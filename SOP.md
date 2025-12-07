@@ -15,9 +15,9 @@ Locate the main export file:
 
 ### 1.2 Determine Package Name
 - Must be lowercase/kebab-case
-- Recommended prefix: `opencode-*`
-- Avoid scoped packages unless requested
-- Example: `opencode-ultrathink-plugin`
+- Recommended: Either `opencode-*` (unscoped) or `@username/plugin-name` (scoped)
+- Both unscoped and scoped packages work correctly
+- Examples: `opencode-ultrathink-plugin` or `@howaboua/pickle-thinker`
 
 ### 1.3 Validate Plugin Interface
 Ensure entrypoint exports a function satisfying `Plugin` type from `@opencode-ai/plugin`:
@@ -52,6 +52,7 @@ Create/update `package.json` with ESM configuration:
   }
 }
 ```
+**Note**: DO NOT include `"exports"` field - it causes Bun installation failures
 
 ### 2.2 Install Dependencies
 ```bash
@@ -111,7 +112,7 @@ Generate with exact installation block:
 
 ## Installation
 
-Add to your `opencode.json` or `.opencode/config`:
+Add to your repository `opencode.json` or user-level `~/.config/opencode/opencode.json`:
 
 ```json
 {
