@@ -1,0 +1,4 @@
+{
+  "plugin": ["./.opencode/plugin/ultrathink-plugin"],
+  "$schema": "https://opencode.ai/config.json"
+}
