@@ -156,10 +156,12 @@ npm publish --access public
 - **"Unexpected token export"**: Ensure `package.json` has `"type": "module"`
 - **Import resolution failures**: Verify `"moduleResolution": "bundler"` in tsconfig.json
 - **Type errors**: Add `@opencode-ai/plugin` to devDependencies
+- **Bun installation failures**: Remove `"exports"` field from package.json
 
 ### 7.2 Validation Checklist
-- [ ] Package name follows kebab-case with `opencode-` prefix
+- [ ] Package name follows kebab-case with `opencode-` prefix or uses scope
 - [ ] `type: "module"` in package.json
+- [ ] No `"exports"` field in package.json (Bun compatibility)
 - [ ] Build produces `.js` and `.d.ts` files
 - [ ] Module verification passes
 - [ ] Installation instructions are exact format
