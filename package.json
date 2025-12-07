@@ -1,0 +1,20 @@
+{
+  "name": "@howaboua/pickle-thinker",
+  "version": "0.1.1",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [ "dist", "README.md", "LICENSE" ],
+  "peerDependencies": {
+    "@opencode-ai/plugin": "^1.0.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepublishOnly": "npm run build"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "@types/node": "^20.0.0",
+    "@opencode-ai/plugin": "^1.0.0"
+  }
+}

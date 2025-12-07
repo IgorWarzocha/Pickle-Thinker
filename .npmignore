@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+*.tsbuildinfo
+
+# Source files (only include built dist/)
+src/
+*.ts
+
+# Config files
+tsconfig.json
+
+# Development files
+.git/
+.gitignore
+README.md
+LICENSE
+SOP.md
+AGENTS.md
+
+# OpenCode specific
+.opencode/
+
+# Tests
+test/
+tests/
+*.test.ts
+*.spec.ts
+
+# IDE/Editor
+.vscode/
+.idea/
+
+# Logs
+*.log
+logs/
+
+# Environment
+.env*
