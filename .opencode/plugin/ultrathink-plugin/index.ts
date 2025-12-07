@@ -15,6 +15,12 @@ export const UltrathinkPlugin: Plugin = async ({ project, client, $, directory, 
     prefix: "Ultrathink: "
   }
 
+  // Target models that should receive the ultrathink prefix
+  const targetModels = [
+    "glm-4.6",
+    "big-pickle"
+  ]
+
   const originalFetch = globalThis.fetch
 
   // Install fetch wrapper to intercept API calls
@@ -25,6 +31,17 @@ export const UltrathinkPlugin: Plugin = async ({ project, client, $, directory, 
 
     try {
       const body = JSON.parse(init.body)
+      
+
+      
+      // Check if this request is for a target model
+      const modelId = body.model || ''
+      const shouldEnhance = targetModels.some(target => modelId.includes(target))
+      
+      if (!shouldEnhance) {
+        return originalFetch(input, init)
+      }
+      
       let modified = false
 
       // Handle OpenAI Chat Completions format
