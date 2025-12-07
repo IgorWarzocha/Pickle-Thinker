@@ -8,16 +8,32 @@ The Ultrathink plugin modifies your outgoing messages to AI services by prependi
 
 ## Installation
 
-1. Clone or download this plugin to your OpenCode plugins directory:
+You have two options for installing the Ultrathink plugin:
+
+### Option 1: Install in your repository (recommended)
+1. Clone or download this plugin to your project:
 ```bash
-# Copy to your OpenCode plugins folder
-cp -r ultrathink-plugin ~/.config/opencode/plugin/
+git clone https://github.com/IgorWarzocha/Pickle-Thinker.git
 ```
 
-2. Add the plugin to your `opencode.json` configuration:
+2. Add the plugin to your project's `opencode.json` configuration:
 ```json
 {
-  "plugin": ["./ultrathink-plugin"],
+  "plugin": ["./Pickle-Thinker/.opencode/plugin/ultrathink-plugin"],
+  "$schema": "https://opencode.ai/config.json"
+}
+```
+
+### Option 2: Install globally
+1. Clone or download this plugin to your global OpenCode plugins directory:
+```bash
+git clone https://github.com/IgorWarzocha/Pickle-Thinker.git ~/.config/opencode/plugin/Pickle-Thinker
+```
+
+2. Add the plugin to your global `opencode.json` configuration:
+```json
+{
+  "plugin": ["./Pickle-Thinker/.opencode/plugin/ultrathink-plugin"],
   "$schema": "https://opencode.ai/config.json"
 }
 ```
