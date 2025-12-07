@@ -16,10 +16,15 @@ You have two options for installing the Ultrathink plugin:
 git clone https://github.com/IgorWarzocha/Pickle-Thinker.git
 ```
 
-2. Add the plugin to your project's `opencode.json` configuration:
+2. Copy the plugin to your project's `.opencode` directory:
+```bash
+cp -r Pickle-Thinker/.opencode/plugin/ultrathink-plugin ./.opencode/plugin/
+```
+
+3. Add the plugin to your project's `opencode.json` configuration:
 ```json
 {
-  "plugin": ["./Pickle-Thinker/.opencode/plugin/ultrathink-plugin"],
+  "plugin": ["./.opencode/plugin/ultrathink-plugin"],
   "$schema": "https://opencode.ai/config.json"
 }
 ```
@@ -30,10 +35,15 @@ git clone https://github.com/IgorWarzocha/Pickle-Thinker.git
 git clone https://github.com/IgorWarzocha/Pickle-Thinker.git ~/.config/opencode/plugin/Pickle-Thinker
 ```
 
-2. Add the plugin to your global `opencode.json` configuration:
+2. Copy the plugin to the global plugins directory:
+```bash
+cp -r Pickle-Thinker/.opencode/plugin/ultrathink-plugin ~/.config/opencode/plugin/
+```
+
+3. Add the plugin to your global `opencode.json` configuration:
 ```json
 {
-  "plugin": ["./Pickle-Thinker/.opencode/plugin/ultrathink-plugin"],
+  "plugin": ["./ultrathink-plugin"],
   "$schema": "https://opencode.ai/config.json"
 }
 ```
