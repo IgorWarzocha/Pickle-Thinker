@@ -8,7 +8,7 @@ The Ultrathink plugin modifies your outgoing messages to AI services by prependi
 
 ## Installation
 
-Add to your `opencode.json` or `.opencode/config`:
+Add to your repository `opencode.json` or user-level `~/.config/opencode/opencode.json`:
 
 ```json
 {
