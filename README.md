@@ -1,10 +1,26 @@
-# Ultrathink Plugin
+# Pickle-Thinker
 
-A simple OpenCode plugin that automatically injects "Ultrathink: " before user prompts for GLM-4.6 and Big Pickle models, encouraging the AI to engage in deeper, more thoughtful reasoning.
+OpenCode plugin for GLM-4.6 / Big Pickle that auto-adds a steering prefix—set it to “Ultrathink:” or... any other reminder you want.
 
-## What It Does
+Two modes (default: **tool**):
+- **lite**: prefix the latest user message only.
+- **tool**: after every tool call, inject a follow-up prompt; uses two variants (normal vs. failure-heuristic) for post-tool steering.
 
-The Ultrathink plugin modifies your outgoing messages to AI services by prepending "Ultrathink: " to each user prompt **only when using GLM-4.6 or Big Pickle models**. This simple prefix can help elicit more detailed, analytical responses from these specific AI models by signaling that you want them to engage in deeper thinking about your request.
+Config lives in `~/.config/opencode/pickle-thinker.jsonc` (auto-created) or `.opencode/pickle-thinker.jsonc` per project:
+```jsonc
+{
+  // mode: "lite" keeps the single-prefix behavior.
+  // mode: "tool" adds an extra user turn after each tool result (more turns/tokens).
+  "enabled": true,
+  "mode": "tool",
+  "prefix": "Ultrathink: "
+}
+```
+Heads-up: tool mode increases turns/tokens and may affect subscription usage.
+
+### Steering hacks
+- Set `prefix` to anything you like, e.g. `prefix: "Responde solo en español: "` to force language, or `prefix: "Read the docs before answering: "` to nudge behavior. You can drop the word “Ultrathink” entirely if you want.
+This behaves like a lightweight user-prompt hook (similar to Claude Code’s UserPromptSubmit), letting you bake reminders or constraints into every turn.
 
 ## Installation
 
@@ -18,23 +34,20 @@ Add to your repository `opencode.json` or user-level `~/.config/opencode/opencod
 
 ## How It Works
 
-- **Model-specific**: Only activates for GLM-4.6 (`glm-4.6`) and Big Pickle (`big-pickle`) models
-- **Intercepts API calls**: Monitors fetch requests to AI providers
-- **Injects prefix**: Automatically adds "Ultrathink: " to the beginning of your user messages for supported models
-- **Format-agnostic**: Works with different API formats while preserving message structure
-- **Transparent**: No changes to your workflow - just better AI responses when using supported models
+- Only runs for `glm-4.6` and `big-pickle`.
+- Lite mode: prepend `prefix` to the most recent user message.
+- Tool mode: insert `prefix` after each tool output; if the tool output looks like an error, swap to a “failed” prompt.
 
-## Example
+## Examples
 
-Without the plugin:
-```
-User: Explain quantum computing
-```
+- Lite mode (prefix only):  
+  `User: Ultrathink: Explain quantum computing`
 
-With the plugin:
-```
-User: Ultrathink: Explain quantum computing
-```
+- Tool mode (auto-injected after a tool call):  
+  `Ultrathink: Analyze the tool output and continue.`
+
+- Tool mode (failure heuristic fired):  
+  `Ultrathink: Tool output failed. Consider re-running the tool or re-reading the file before editing it.`
 
 ## Acknowledgments
 
