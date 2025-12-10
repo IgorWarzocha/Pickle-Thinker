@@ -1,4 +1,4 @@
-# OpenCode Plugin Packaging Guide
+# OpenCode Plugin Packaging SOP
 
 ## Context
 **Goal:** Convert a local directory of JS/TS OpenCode plugin files into a publishable npm package.
@@ -14,9 +14,10 @@ Locate the main export file:
 - Root-level: `index.ts` (common for npm plugins)
 
 ### 1.2 Determine Package Name
-- Must be scoped: `@username/plugin-name`
-- Use your npm username as scope
-- Package name must be lowercase/kebab-case
+- Must be lowercase/kebab-case
+- Recommended prefix: `opencode-*`
+- Avoid scoped packages unless requested
+- Example: `opencode-ultrathink-plugin`
 
 ### 1.3 Validate Plugin Interface
 Ensure entrypoint exports a function satisfying `Plugin` type from `@opencode-ai/plugin`:
@@ -51,7 +52,6 @@ Create/update `package.json` with ESM configuration:
   }
 }
 ```
-**Note**: DO NOT include `"exports"` field - it causes Bun installation failures
 
 ### 2.2 Install Dependencies
 ```bash
@@ -111,7 +111,7 @@ Generate with exact installation block:
 
 ## Installation
 
-Add to your repository `opencode.json` or user-level `~/.config/opencode/opencode.json`:
+Add to your `opencode.json` or `.opencode/config`:
 
 ```json
 {
@@ -155,12 +155,10 @@ npm publish --access public
 - **"Unexpected token export"**: Ensure `package.json` has `"type": "module"`
 - **Import resolution failures**: Verify `"moduleResolution": "bundler"` in tsconfig.json
 - **Type errors**: Add `@opencode-ai/plugin` to devDependencies
-- **Bun installation failures**: Remove `"exports"` field from package.json
 
 ### 7.2 Validation Checklist
-- [ ] Package name uses scope: `@username/plugin-name`
+- [ ] Package name follows kebab-case with `opencode-` prefix
 - [ ] `type: "module"` in package.json
-- [ ] No `"exports"` field in package.json (Bun compatibility)
 - [ ] Build produces `.js` and `.d.ts` files
 - [ ] Module verification passes
 - [ ] Installation instructions are exact format
