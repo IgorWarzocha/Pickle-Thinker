@@ -28,7 +28,7 @@ Add to your repository `opencode.json` or user-level `~/.config/opencode/opencod
 
 ```json
 {
-  "plugin": ["@howaboua/pickle-thinker"]
+  "plugin": ["@howaboua/pickle-thinker@0.1.3"]
 }
 ```
 
