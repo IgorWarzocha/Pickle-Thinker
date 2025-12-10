@@ -2,6 +2,8 @@
 
 OpenCode plugin for GLM-4.6 / Big Pickle that auto-adds a steering prefix—set it to “Ultrathink:” or... any other reminder you want.
 
+<img width="1024" height="559" alt="image" src="https://github.com/user-attachments/assets/c0975190-b6d7-4f8a-8fd3-c6850405cabd" />
+
 Two modes (default: **tool**):
 - **lite**: prefix the latest user message only.
 - **tool**: after every tool call, inject a follow-up prompt; uses two variants (normal vs. failure-heuristic) for post-tool steering.
