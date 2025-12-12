@@ -1,10 +1,14 @@
 {
   "name": "@howaboua/pickle-thinker",
-  "version": "0.1.2",
+  "version": "0.2.1",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "files": [ "dist", "README.md", "LICENSE" ],
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "peerDependencies": {
     "@opencode-ai/plugin": "^1.0.0"
   },
