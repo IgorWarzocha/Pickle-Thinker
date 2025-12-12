@@ -90,6 +90,12 @@ Then add to `opencode.json`:
 
 ## How It Works
 
+**Hybrid Architecture**: Uses dual-approach injection for maximum compatibility:
+- **Fetch wrapper**: Intercepts API calls before they reach the model (master approach)
+- **OpenCode hooks**: Transforms messages in the OpenCode pipeline (interleaved approach)
+
+**Model filtering**: Only runs for `glm-4.6` and `big-pickle` models.
+
 - Only runs for `glm-4.6` and `big-pickle`.
 - Lite mode: prepend `prefix` to the most recent user message.
 - Tool mode: insert `prefix` after each tool output; if the tool output looks like an error, swap to a “failed” prompt.

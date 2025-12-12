@@ -1,9 +1,6 @@
 /**
- * Ultrathink Plugin - Injects thinking prompts during AI tool execution
- * Refactored modular implementation following DRY principles
- *
- * Uses experimental.chat.messages.transform hook for message interception
- * and tool.execute.after hook for tool chain thinking injection
+ * Ultrathink Plugin - Hybrid implementation using both fetch wrapper and OpenCode hooks
+ * Combines direct API interception (master) with OpenCode pipeline integration (current)
  */
 
 import type { Plugin } from "@opencode-ai/plugin"
@@ -11,6 +8,8 @@ import { getConfig } from "./config.js"
 import { createTransformHandler } from "./message-transformer.js"
 import { createToolExecuteHook } from "./tool-handler.js"
 import { clearLogFile, logToFile, setDebugMode } from "./logger.js"
+import { initializeFetchWrapper } from "./fetch-wrapper.js"
+import { logTargetModels } from "./model-filter.js"
 
 // Event batching system for noise reduction
 const eventCounts = new Map<string, number>()
@@ -47,12 +46,15 @@ const hookState = {
 
 export const implementation: Plugin = async (ctx) => {
   clearLogFile()
-  logToFile("=== 🧠 ULTRATHINK PLUGIN STARTING UP ===")
+  logToFile("=== 🧠 ULTRATHINK PLUGIN HYBRID STARTING UP ===")
   logToFile(`Context keys: ${Object.keys(ctx).join(", ")}`)
 
   const config = getConfig(ctx)
   setDebugMode(config.debug || false)
   logToFile(`Config: ${JSON.stringify(config)}`)
+
+  // Initialize fetch wrapper (master approach)
+  initializeFetchWrapper(config)
 
   const hooks: any = {}
 
@@ -83,13 +85,16 @@ export const implementation: Plugin = async (ctx) => {
     flushEventCounts() // Try to flush if conditions are met
   }
 
-  // Hook to transform messages and inject thinking prompts
+  // Hook to transform messages and inject thinking prompts (current approach)
   hooks["experimental.chat.messages.transform"] = createTransformHandler(config, hookState)
 
-  // Hook to inject thinking during tool execution chains
+  // Hook to inject thinking during tool execution chains (current approach)
   hooks["tool.execute.after"] = createToolExecuteHook(config, hookState)
 
   logToFile(`PLUGIN LOADED WITH HOOKS: ${Object.keys(hooks).join(", ")}`, "DEBUG")
-  logToFile(`🔄 Hook coordination system initialized`, "DEBUG")
+  logTargetModels()
+  logToFile(`🔄 Hybrid system initialized (fetch wrapper + hooks)`, "DEBUG")
   return hooks
 }
+
+

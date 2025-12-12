@@ -6,15 +6,22 @@
 import type { MessageWithParts } from "./types.js"
 import { buildThinkingPrompt } from "./thinking-prompts.js"
 import { logToFile } from "./logger.js"
+import { shouldEnhanceModel } from "./model-filter.js"
 
 export function createTransformHandler(config: any, hookState: any = {}) {
-  return async (_: any, output: { messages: MessageWithParts[] }) => {
+  return async (input: any, output: { messages: MessageWithParts[] }) => {
     const startTime = Date.now()
     hookState.messageTransform.lastFired = startTime
     logToFile(`🔍 MESSAGE TRANSFORM HOOK FIRED (${output.messages.length} messages)`)
 
     if (!config.enabled) {
       logToFile(`❌ Plugin disabled - skipping transform`, "DEBUG")
+      return
+    }
+
+    // Filter for target models only
+    const modelId = input.model || ""
+    if (!shouldEnhanceModel(modelId)) {
       return
     }
 

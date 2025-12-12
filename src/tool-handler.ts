@@ -7,6 +7,7 @@ import type { ToolInput, ToolOutput } from "./types.js"
 import { buildThinkingPrompt } from "./thinking-prompts.js"
 import { isToolOutputFailed } from "./utils.js"
 import { logToFile } from "./logger.js"
+import { TARGET_MODELS } from "./model-filter.js"
 
 // Track recent injections to prevent duplicates
 const recentInjections = new Map<string, number>()
@@ -21,6 +22,11 @@ export function createToolExecuteHook(config: any, hookState: any = {}) {
       logToFile(`❌ Plugin disabled or not in tool mode`, "DEBUG")
       return output
     }
+
+    // Note: ToolInput doesn't include model info, so we can't filter by model here
+    // This hook will run for all tools, but thinking prompts will only be injected
+    // for target models when they reach the message transformation stage
+    logToFile(`⚠️ Tool handler: Model filtering not available at this stage`, "DEBUG")
 
     // Apply ultrathinking to EVERY tool - no skipping!
 
