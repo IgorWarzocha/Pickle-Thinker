@@ -1,209 +1,262 @@
 /**
  * Message transformation logic for Ultrathink Plugin
- * Handles injection of thinking prompts into message arrays
+ *
+ * Reliability-first strategy for target models:
+ * - Ensure every user message begins with the magic keyword "Ultrathink".
+ * - After tool results (tool parts), inject a synthetic user message to force an
+ *   interleaved-thought step.
+ * - Also append an Ultrathink prompt into tool output/error strings (best-effort),
+ *   including batched/parallel tool parts that bypass tool hooks.
  */
 
 import type { MessageWithParts } from "./types.js"
-import { buildThinkingPrompt } from "./thinking-prompts.js"
+import { buildThinkingPrompt, getUltrathinkPrefixText } from "./thinking-prompts.js"
 import { logToFile } from "./logger.js"
 import { shouldEnhanceModel } from "./model-filter.js"
+import { isToolOutputFailed } from "./utils.js"
+import { setSessionEnhanceState } from "./session-state.js"
+
+type AnyMessage = MessageWithParts & {
+  info: any
+  parts: any[]
+}
+
+const USER_AFTER_TOOL_MARKER = "[opencode-ultrathink:user-after-tool]"
+const TOOL_PART_MARKER = "[opencode-ultrathink:tool-part]"
+
+function getModelKeyFromMessages(messages: AnyMessage[]): string {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const info: any = messages[i]?.info
+    if (!info) continue
+
+    if (info.role === "user") {
+      const providerID = info.model?.providerID
+      const modelID = info.model?.modelID
+      if (typeof providerID === "string" && typeof modelID === "string") {
+        return `${providerID}/${modelID}`
+      }
+    }
+
+    if (info.role === "assistant") {
+      const providerID = info.providerID
+      const modelID = info.modelID
+      if (typeof providerID === "string" && typeof modelID === "string") {
+        return `${providerID}/${modelID}`
+      }
+    }
+  }
+
+  return ""
+}
+
+function getSessionIDFromMessages(messages: AnyMessage[]): string {
+  for (const msg of messages) {
+    const sessionID = msg?.info?.sessionID
+    if (typeof sessionID === "string" && sessionID.length > 0) return sessionID
+
+    if (Array.isArray(msg?.parts)) {
+      for (const part of msg.parts) {
+        if (typeof part?.sessionID === "string" && part.sessionID.length > 0) return part.sessionID
+      }
+    }
+  }
+  return ""
+}
+
+function isTextPart(part: any): part is { type: "text"; text: string } {
+  return part?.type === "text" && typeof part.text === "string"
+}
+
+function ensureUltrathinkOnUserMessage(message: AnyMessage, prefixText: string): boolean {
+  if (message.info?.role !== "user") return false
+  if (!Array.isArray(message.parts)) return false
+
+  for (const part of message.parts) {
+    if (!isTextPart(part)) continue
+
+    // If the user already starts with Ultrathink (maybe manual), do nothing.
+    if (part.text.trimStart().toLowerCase().startsWith("ultrathink")) return false
+
+    message.parts.unshift({
+      type: "text",
+      text: prefixText,
+    })
+    return true
+  }
+
+  message.parts.unshift({
+    type: "text",
+    text: prefixText,
+  })
+  return true
+}
+
+function ensureUltrathinkOnAllUserMessages(messages: AnyMessage[], prefixText: string): number {
+  let modified = 0
+  for (const message of messages) {
+    if (ensureUltrathinkOnUserMessage(message, prefixText)) modified++
+  }
+  return modified
+}
+
+function ensureUltrathinkOnLastUserMessage(messages: AnyMessage[], prefixText: string): boolean {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i]?.info?.role === "user") {
+      return ensureUltrathinkOnUserMessage(messages[i], prefixText)
+    }
+  }
+  return false
+}
+
+function assistantHasToolParts(message: AnyMessage): { hasTool: boolean; failed: boolean } {
+  if (message.info?.role !== "assistant") return { hasTool: false, failed: false }
+  if (!Array.isArray(message.parts)) return { hasTool: false, failed: false }
+
+  let hasTool = false
+  let failed = false
+
+  for (const part of message.parts) {
+    if (part?.type !== "tool") continue
+    const status = part?.state?.status
+    if (status === "completed") {
+      hasTool = true
+    }
+    if (status === "error") {
+      hasTool = true
+      failed = true
+    }
+  }
+
+  return { hasTool, failed }
+}
+
+function appendUltrathinkToToolParts(messages: AnyMessage[], prefix: string): number {
+  let modified = 0
+
+  for (const message of messages) {
+    if (message.info?.role !== "assistant" || !Array.isArray(message.parts)) continue
+
+    for (const part of message.parts) {
+      if (part?.type !== "tool" || !part?.state) continue
+
+      const status = part.state.status
+      if (status !== "completed" && status !== "error") continue
+
+      if (status === "completed") {
+        const output = part.state.output
+        if (typeof output !== "string" || output.length === 0) continue
+        if (output.includes(TOOL_PART_MARKER)) continue
+
+        const failed = isToolOutputFailed(output)
+        const ultrathink = buildThinkingPrompt(prefix, failed)
+        part.state.output = `${output}\n\n${TOOL_PART_MARKER}\n${ultrathink}`
+        modified++
+      }
+
+      if (status === "error") {
+        const errorText = part.state.error
+        if (typeof errorText !== "string" || errorText.length === 0) continue
+        if (errorText.includes(TOOL_PART_MARKER)) continue
+
+        const ultrathink = buildThinkingPrompt(prefix, true)
+        part.state.error = `${errorText}\n\n${TOOL_PART_MARKER}\n${ultrathink}`
+        modified++
+      }
+    }
+  }
+
+  return modified
+}
+
+function injectAfterToolMessages(messages: AnyMessage[], prefix: string): number {
+  let injections = 0
+
+  for (let i = 0; i < messages.length; i++) {
+    const message = messages[i]
+    const { hasTool, failed } = assistantHasToolParts(message)
+    if (!hasTool) continue
+
+    const assistantID = typeof message.info?.id === "string" ? message.info.id : `assistant-${i}`
+    const injectedID = `ultrathink-after-${assistantID}`
+
+    // Deduplicate: if the exact injected message already exists anywhere, skip.
+    if (messages.some((m) => m?.info?.id === injectedID)) {
+      continue
+    }
+
+    const ultrathink = buildThinkingPrompt(prefix, failed)
+
+    messages.splice(i + 1, 0, {
+      info: {
+        role: "user",
+        id: injectedID,
+        created: Date.now(),
+      },
+      parts: [
+        {
+          type: "text",
+          text: `${USER_AFTER_TOOL_MARKER}\n${ultrathink}`,
+        },
+      ],
+    })
+
+    injections++
+    i++
+  }
+
+  return injections
+}
 
 export function createTransformHandler(config: any, hookState: any = {}) {
-  return async (input: any, output: { messages: MessageWithParts[] }) => {
+  return async (_input: any, output: { messages: AnyMessage[] }) => {
     const startTime = Date.now()
     hookState.messageTransform.lastFired = startTime
-    logToFile(`🔍 MESSAGE TRANSFORM HOOK FIRED (${output.messages.length} messages)`)
 
     if (!config.enabled) {
       logToFile(`❌ Plugin disabled - skipping transform`, "DEBUG")
       return
     }
 
-    // Filter for target models only
-    const modelId = input.model || ""
-    if (!shouldEnhanceModel(modelId)) {
+    const sessionID = getSessionIDFromMessages(output.messages)
+    const modelKey = getModelKeyFromMessages(output.messages)
+    const enhance = shouldEnhanceModel(modelKey)
+
+    if (sessionID) {
+      setSessionEnhanceState(sessionID, enhance, modelKey)
+    }
+
+    if (!enhance) {
+      logToFile(`🎯 Skipping message transform for model: ${modelKey || "unknown"}`, "DEBUG")
       return
     }
 
+    const prefix = typeof config.prefix === "string" ? config.prefix : "Ultrathink: "
+    const prefixText = getUltrathinkPrefixText(prefix) + "\n\n"
+
     const toolMode = config.mode === "tool"
-    let injections = 0
     const initialMessageCount = output.messages.length
 
+    let userPrefixCount = 0
+    let toolPartAppends = 0
+    let toolTurnInjections = 0
+
     if (toolMode) {
-      const modified = transformMessagesForToolMode(output.messages, config.prefix)
-      injections = modified ? 1 : 0
+      userPrefixCount = ensureUltrathinkOnAllUserMessages(output.messages, prefixText)
+      toolPartAppends = appendUltrathinkToToolParts(output.messages, prefix)
+      toolTurnInjections = injectAfterToolMessages(output.messages, prefix)
     } else {
-      const modified = transformMessagesForLiteMode(output.messages, config.prefix)
-      injections = modified ? 1 : 0
+      userPrefixCount = ensureUltrathinkOnLastUserMessage(output.messages, prefixText) ? 1 : 0
     }
 
-    const endTime = Date.now()
-    const duration = endTime - startTime
+    const duration = Date.now() - startTime
 
-    if (injections > 0) {
+    if (userPrefixCount > 0 || toolPartAppends > 0 || toolTurnInjections > 0) {
       hookState.messageTransform.lastSuccess = Date.now()
       logToFile(
-        `✅ Injected ${injections} thinking prompts (${toolMode ? "tool" : "lite"} mode, ${duration}ms, ${initialMessageCount}→${output.messages.length} messages)`,
+        `✅ Ultrathink injected (mode=${toolMode ? "tool" : "lite"}, model=${modelKey}, prefixed=${userPrefixCount}, toolPartAppends=${toolPartAppends}, toolTurns=${toolTurnInjections}, ${duration}ms, ${initialMessageCount}→${output.messages.length} messages)`,
       )
     } else {
-      logToFile(`⚠️ No injections (${toolMode ? "tool" : "lite"} mode, ${duration}ms) - no tool executions`)
-    }
-
-    return
-  }
-}
-
-function transformMessagesForToolMode(messages: MessageWithParts[], prefix: string): boolean {
-  if (messages.length === 0) {
-    return false
-  }
-
-  const newMessages: MessageWithParts[] = []
-  let thinkingInjections = 0
-  let toolExecutionsFound = 0
-
-  for (let i = 0; i < messages.length; i++) {
-    const message = messages[i]
-    newMessages.push(message)
-
-    // In tool mode, inject ultrathink after every user message
-    if (message.info.role === "user") {
-      const hasActualToolExecution = message.parts.some((part) => {
-        const type = part.type
-        const text = part.text || ""
-
-        if (
-          type === "tool_call" ||
-          type === "function_call" ||
-          type === "tool_use" ||
-          type === "tool" ||
-          type === "function"
-        ) {
-          return true
-        }
-
-        if (type === "text" && typeof text === "string") {
-          const actualCommands = [
-            text.includes("$") && text.length > 10,
-            (text.includes("bash") || text.includes("npm") || text.includes("git")) &&
-              (text.includes("executed") || text.includes("running") || text.includes("output:")),
-            text.includes("<bash>") || text.includes("</bash>"),
-          ]
-
-          if (actualCommands.some((cmd) => cmd)) {
-            return true
-          }
-        }
-
-        return false
-      })
-
-      if (hasActualToolExecution) {
-        toolExecutionsFound++
-      }
-
-      const failed = hasActualToolExecution ? checkForFailure(message) : false
-      const thinkingPrompt = buildThinkingPrompt(prefix, failed, message)
-
-      newMessages.push({
-        info: {
-          role: "user",
-          id: `ultrathink-${Date.now()}-${i}`,
-          created: Date.now(),
-        },
-        parts: [
-          {
-            type: "text",
-            text: thinkingPrompt,
-          },
-        ],
-      })
-      thinkingInjections++
-      logToFile(
-        `💭 Injection ${thinkingInjections}: ${hasActualToolExecution ? `tool execution ${failed ? "(failed)" : "(success)"}` : "user message"} in message ${i + 1}`,
-        "DEBUG",
-      )
+      logToFile(`⚠️ No changes (mode=${toolMode ? "tool" : "lite"}, model=${modelKey}, ${duration}ms)`, "DEBUG")
     }
   }
-
-  const modified = thinkingInjections > 0
-
-  if (!modified) {
-    ensureLastUserMessagePrefixed(newMessages, prefix)
-  }
-
-  messages.splice(0, messages.length, ...newMessages)
-  return modified
-}
-
-function transformMessagesForLiteMode(messages: MessageWithParts[], prefix: string): boolean {
-  return ensureLastUserMessagePrefixed(messages, prefix)
-}
-
-function ensureLastUserMessagePrefixed(messages: MessageWithParts[], prefix: string): boolean {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const message = messages[i]
-    if (message.info.role === "user") {
-      let modified = false
-      for (const part of message.parts) {
-        if (part.type === "text" && typeof part.text === "string") {
-          if (!part.text.startsWith(prefix)) {
-            part.text = prefix + part.text
-            modified = true
-          }
-        }
-      }
-      return modified
-    }
-  }
-  return false
-}
-
-function checkForFailure(message: MessageWithParts): boolean {
-  return message.parts.some((part) => {
-    const output = part.output || part.content || part.text || ""
-
-    const failWords = ["error", "failed", "exception", "traceback", "stack", "not found"]
-    const checkString = (text: string): boolean => {
-      const lower = text.toLowerCase()
-      if (failWords.some((w) => lower.includes(w))) return true
-      try {
-        const parsed = JSON.parse(text)
-        return checkForFailureFromContent(parsed)
-      } catch {
-        return false
-      }
-    }
-
-    if (typeof output === "string") return checkString(output)
-
-    if (Array.isArray(output)) {
-      return output.some((item) => {
-        if (typeof item === "string") return checkString(item)
-        if (item?.text && typeof item.text === "string") return checkString(item.text)
-        return false
-      })
-    }
-
-    if (output && typeof output === "object") {
-      return checkForFailureFromContent(output)
-    }
-
-    return false
-  })
-}
-
-function checkForFailureFromContent(content: any): boolean {
-  const failWords = ["error", "failed", "exception", "traceback", "stack", "not found"]
-
-  const status = (content.status || content.state || content.result || content.error)?.toString().toLowerCase?.()
-  if (status && !["completed", "success", "succeeded", "ok", "done"].includes(status)) return true
-
-  return Object.values(content).some((v: any) => {
-    if (typeof v === "string") {
-      const lower = v.toLowerCase()
-      return failWords.some((w) => lower.includes(w))
-    }
-    return false
-  })
 }

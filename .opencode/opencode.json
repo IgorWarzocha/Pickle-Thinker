@@ -1,6 +1,6 @@
 {
   "plugin": [
-    "./plugin/pickle-thinker"
+    "../dist"
   ],
   "$schema": "https://opencode.ai/config.json"
 }

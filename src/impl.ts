@@ -7,7 +7,6 @@ import type { Plugin } from "@opencode-ai/plugin"
 import { getConfig } from "./config.js"
 import { createTransformHandler } from "./message-transformer.js"
 import { createToolExecuteHook } from "./tool-handler.js"
-import { createSystemTransformHandler } from "./system-transformer.js"
 import { createSessionCompactionHandler } from "./session-compaction.js"
 import { clearLogFile, logToFile, setDebugMode } from "./logger.js"
 import { initializeFetchWrapper } from "./fetch-wrapper.js"
@@ -55,8 +54,12 @@ export const implementation: Plugin = async (ctx) => {
   setDebugMode(config.debug || false)
   logToFile(`Config: ${JSON.stringify(config)}`)
 
-  // Initialize fetch wrapper (master approach)
-  initializeFetchWrapper(config)
+  // Legacy "lite" mode uses fetch wrapper injection.
+  // "tool" mode relies on OpenCode hooks only.
+  if (config.enabled && config.mode === "lite") {
+    initializeFetchWrapper(config)
+    logToFile(`🌐 Fetch wrapper enabled (lite mode)`, "DEBUG")
+  }
 
   const hooks: any = {}
 
@@ -87,9 +90,7 @@ export const implementation: Plugin = async (ctx) => {
     flushEventCounts() // Try to flush if conditions are met
   }
 
-  // Hook to inject thinking into system prompt
-  hooks["experimental.chat.system.transform"] = createSystemTransformHandler(config)
-
+  // Avoid system-prompt mutation; keep the plugin scoped to model-gated message injections.
   // Hook to transform messages and inject thinking prompts (current approach)
   hooks["experimental.chat.messages.transform"] = createTransformHandler(config, hookState)
 

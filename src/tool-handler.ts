@@ -1,87 +1,53 @@
 /**
- * Tool execution handling for the Ultrathink Plugin
- * Manages thinking injection during tool execution chains
+ * Tool execution hook for Ultrathink Plugin
+ *
+ * Strategy: best-effort redundancy.
+ * - In tool mode and for target sessions, append an Ultrathink prompt to tool output.
+ * - Message transform also injects Ultrathink turns and can append to tool parts.
+ *
+ * Duplication is acceptable; missing Ultrathink is not.
  */
 
 import type { ToolInput, ToolOutput } from "./types.js"
 import { buildThinkingPrompt } from "./thinking-prompts.js"
 import { isToolOutputFailed } from "./utils.js"
 import { logToFile } from "./logger.js"
-import { TARGET_MODELS } from "./model-filter.js"
+import { shouldEnhanceSession } from "./session-state.js"
 
-// Track recent injections to prevent duplicates
-const recentInjections = new Map<string, number>()
+const TOOL_OUTPUT_MARKER = "[opencode-ultrathink:tool-output]"
 
 export function createToolExecuteHook(config: any, hookState: any = {}) {
   return async (input: ToolInput, output: ToolOutput) => {
-    const startTime = Date.now()
-    hookState.toolExecute.lastFired = startTime
-    logToFile(`🔧 TOOL EXECUTE HOOK FIRED: ${input.tool}`, "DEBUG")
+    const now = Date.now()
+    hookState.toolExecute.lastFired = now
 
     if (!config.enabled || config.mode !== "tool") {
-      logToFile(`❌ Plugin disabled or not in tool mode`, "DEBUG")
       return output
     }
 
-    // Note: ToolInput doesn't include model info, so we can't filter by model here
-    // This hook will run for all tools, but thinking prompts will only be injected
-    // for target models when they reach the message transformation stage
-    logToFile(`⚠️ Tool handler: Model filtering not available at this stage`, "DEBUG")
-
-    // Apply ultrathinking to EVERY tool - no skipping!
-
-    // Apply thinking to ALL tools - no skipping logic
-    // Only skip if no output at all
-    if (!output.output) {
-      logToFile(`⚠️ No output from ${input.tool} - skipping injection`, "DEBUG")
+    // Tool hooks don't include model info; gate using session state learned from message transforms.
+    if (!shouldEnhanceSession(input.sessionID)) {
       return output
     }
 
-    // Debounce: prevent duplicate injections within 2 seconds
-    const injectionKey = `${input.tool}-${JSON.stringify(output.output).slice(0, 100)}`
-    const now = Date.now()
-    const lastInjection = recentInjections.get(injectionKey)
-
-    if (lastInjection && now - lastInjection < 2000) {
-      logToFile(`⚠️ Recent injection detected for ${input.tool} - skipping`, "DEBUG")
+    const out: any = (output as any)?.output
+    if (typeof out !== "string" || out.length === 0) {
       return output
     }
 
-    recentInjections.set(injectionKey, now)
-
-    // Clean old entries from the map (older than 30 seconds)
-    for (const [key, timestamp] of recentInjections.entries()) {
-      if (now - timestamp > 30000) {
-        recentInjections.delete(key)
-      }
+    // Avoid infinite growth if something replays tool outputs.
+    if (out.includes(TOOL_OUTPUT_MARKER)) {
+      return output
     }
 
-    const failed = isToolOutputFailed(output)
-    logToFile(`📊 Tool ${input.tool} failed: ${failed}`, "DEBUG")
+    const failed = isToolOutputFailed(out) || Boolean((output as any)?.metadata?.error)
+    const ultrathink = buildThinkingPrompt(config.prefix, failed)
 
-    const thinkingPrompt = buildThinkingPrompt(config.prefix, failed)
+    ;(output as any).output = `${out}\n\n${TOOL_OUTPUT_MARKER}\n${ultrathink}`
 
-    modifyToolOutput(output, thinkingPrompt)
-
-    const duration = Date.now() - startTime
-
-    hookState.toolExecute.lastSuccess = Date.now()
-    // File logging for visibility
-    logToFile(`✅ Injected thinking after ${input.tool}${failed ? " (detected failure)" : ""} (${duration}ms)`)
-    logToFile(`Tool ${input.tool} output length: ${String(output.output)?.length || 0}`, "DEBUG")
+    hookState.toolExecute.lastSuccess = now
+    logToFile(`🔧 Appended Ultrathink to tool output: ${input.tool} (failed=${failed})`, "DEBUG")
 
     return output
-  }
-}
-
-function modifyToolOutput(output: ToolOutput, thinkingPrompt: string) {
-  if (typeof output.output === "string") {
-    output.output = output.output + "\n\n" + thinkingPrompt
-  } else if (output.output && typeof output.output === "object") {
-    if (output.output.text) {
-      output.output.text = output.output.text + "\n\n" + thinkingPrompt
-    } else {
-      output.output.thinking = thinkingPrompt
-    }
   }
 }

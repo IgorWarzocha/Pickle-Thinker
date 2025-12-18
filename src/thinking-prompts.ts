@@ -1,43 +1,40 @@
-// REMOVED: All filtering functions that limited when thinking prompts would trigger
-// The plugin now triggers on ALL relevant events without filtering
+export const ULTRATHINK_KEYWORD = "Ultrathink"
 
-export function buildThinkingPrompt(prefix: string, failed: boolean, context?: any): string {
-  // Simple, always-on thinking prompt - no filtering
-  if (failed) {
-    return `${prefix}Tool output failed. Consider re-running the tool or re-reading the file before editing it.`
+export function getUltrathinkPrefixText(prefix: string): string {
+  const trimmed = typeof prefix === "string" ? prefix.trim() : ""
+  if (!trimmed) return ULTRATHINK_KEYWORD
+
+  // Keep any configured prefix that still starts with "Ultrathink".
+  if (trimmed.toLowerCase().startsWith("ultrathink")) {
+    // Preserve the user's formatting (e.g. "Ultrathink:"), but keep it short.
+    const firstLine = trimmed.split("\n")[0] ?? trimmed
+    return firstLine.trimEnd()
   }
-  return `${prefix}Analyze the tool output and continue.`
+
+  // If user configured something else, still force the magic keyword.
+  return ULTRATHINK_KEYWORD
 }
 
-function getThinkingKeyword(): string {
-  return "ultrathink"
+function pick<T>(items: T[]): T {
+  return items[Math.floor(Math.random() * items.length)]
 }
 
-export function buildContextAwarePrompt(keyword: string, context?: any, failed?: boolean): string {
-  // Prompts focused on thinking and analysis - not quality validation
-  const prompts = [
-    "take time to analyze this thoroughly.",
-    "think through all implications here.",
-    "consider this from multiple angles.",
-    "break this down systematically.",
-    "work through this step by step.",
-    "analyze each component carefully.",
-    "consider next steps carefully.",
-    "think about how this scales.",
-    "consider long-term implications.",
-    "process this information methodically.",
-    "work through this systematically.",
-    "consider implications before proceeding.",
-    "approach this methodically.",
+export function buildThinkingPrompt(prefix: string, failed: boolean): string {
+  const header = getUltrathinkPrefixText(prefix)
+
+  const successVariants = [
+    "Continue.",
+    "Review the tool output carefully, then continue.",
+    "Consider the tool output; proceed deliberately.",
+    "Think through the implications, then continue.",
   ]
 
-  const randomPrompt = prompts[Math.floor(Math.random() * prompts.length)]
+  const failureVariants = [
+    "The tool failed. Re-check inputs, then decide next step.",
+    "The output looks failed or incomplete. Diagnose and retry if needed.",
+    "Treat this as a failure case; verify assumptions and continue.",
+  ]
 
-  // Simple context modifier - no complex filtering
-  let prefixModifier = ""
-  if (failed) {
-    prefixModifier = "Given failure, "
-  }
-
-  return prefixModifier + randomPrompt
+  const body = failed ? pick(failureVariants) : pick(successVariants)
+  return `${header}\n\n${body}`
 }

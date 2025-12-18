@@ -12,8 +12,6 @@ tsconfig.json
 # Development files
 .git/
 .gitignore
-README.md
-LICENSE
 SOP.md
 AGENTS.md
 
