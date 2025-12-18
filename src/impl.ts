@@ -101,7 +101,7 @@ export const implementation: Plugin = async (ctx) => {
   hooks["experimental.session.compacting"] = createSessionCompactionHandler(config)
 
   logToFile(`PLUGIN LOADED WITH HOOKS: ${Object.keys(hooks).join(", ")}`, "DEBUG")
-  logTargetModels()
+  logTargetModels(config.targetModels)
   logToFile(`🔄 Hybrid system initialized (fetch wrapper + hooks)`, "DEBUG")
   return hooks
 }

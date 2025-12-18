@@ -10,17 +10,31 @@ export interface UltrathinkConfig {
   prefix: string
   mode: UltrathinkMode
   debug?: boolean
+  /**
+   * Model IDs (substring match) that should receive Ultrathink injections.
+   * Matched against a `${providerID}/${modelID}` key.
+   */
+  targetModels: string[]
 }
 
 const GLOBAL_DIR = join(homedir(), ".config", "opencode")
 const GLOBAL_JSONC = join(GLOBAL_DIR, "pickle-thinker.jsonc")
 const GLOBAL_JSON = join(GLOBAL_DIR, "pickle-thinker.json")
 
+export const DEFAULT_TARGET_MODELS = [
+  "glm-4.6",
+  "zai/glm-4.6",
+  "zai-coding-plan/glm-4.6",
+  "big-pickle",
+  "opencode/big-pickle",
+]
+
 const defaultConfig: UltrathinkConfig = {
   enabled: true,
   prefix: "Ultrathink: ",
   mode: "tool",
   debug: false,
+  targetModels: DEFAULT_TARGET_MODELS,
 }
 
 function stripCommentsAndTrailingCommas(text: string): string {
@@ -70,9 +84,17 @@ function ensureDefaultConfig(): void {
   // Change thinking keyword if you like
   "prefix": "Ultrathink: ",
   // Enable debug logging to console/file
-  "debug": false
+  "debug": false,
+  // Models to enhance (substring match against "providerID/modelID")
+  "targetModels": [
+    "glm-4.6",
+    "zai/glm-4.6",
+    "zai-coding-plan/glm-4.6",
+    "big-pickle",
+    "opencode/big-pickle"
+  ]
 }
-`
+ `
 
   writeFileSync(GLOBAL_JSONC, content, "utf-8")
 }
@@ -107,5 +129,10 @@ export function getConfig(ctx?: PluginInput): UltrathinkConfig {
   const mode = loaded.mode === "lite" || loaded.mode === "tool" ? loaded.mode : defaultConfig.mode
   const debug = typeof loaded.debug === "boolean" ? loaded.debug : defaultConfig.debug
 
-  return { enabled, prefix, mode, debug }
+  const targetModels =
+    Array.isArray((loaded as any).targetModels) && (loaded as any).targetModels.every((m: any) => typeof m === "string")
+      ? ((loaded as any).targetModels as string[])
+      : defaultConfig.targetModels
+
+  return { enabled, prefix, mode, debug, targetModels }
 }

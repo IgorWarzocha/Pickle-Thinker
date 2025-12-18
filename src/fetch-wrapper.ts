@@ -4,7 +4,7 @@
  */
 
 import { logToFile } from "./logger.js"
-import { TARGET_MODELS, shouldEnhanceModel } from "./model-filter.js"
+import { shouldEnhanceModel, logTargetModels } from "./model-filter.js"
 
 interface FetchWrapperConfig {
   enabled: boolean
@@ -13,34 +13,33 @@ interface FetchWrapperConfig {
 }
 
 export function initializeFetchWrapper(config: FetchWrapperConfig) {
-
   const originalFetch = globalThis.fetch
 
   globalThis.fetch = async (input: any, init?: any) => {
-    if (!config.enabled || !init?.body || typeof init.body !== 'string') {
+    if (!config.enabled || !init?.body || typeof init.body !== "string") {
       return originalFetch(input, init)
     }
 
     try {
       const body = JSON.parse(init.body)
-      
+
       // Check if this request is for a target model
-      const modelId = body.model || ''
-      const shouldEnhance = shouldEnhanceModel(modelId)
-      
+      const modelId = body.model || ""
+      const shouldEnhance = shouldEnhanceModel(modelId, (config as any).targetModels)
+
       if (!shouldEnhance) {
         return originalFetch(input, init)
       }
-      
+
       let modified = false
-      const toolMode = config.mode === 'tool'
+      const toolMode = config.mode === "tool"
 
       // Handle OpenAI Chat Completions format
       if (body.messages && Array.isArray(body.messages)) {
         modified = toolMode
           ? injectIntoOpenAIMessages(body.messages, config.prefix)
           : injectLitePrefix(body.messages, config.prefix)
-        logToFile(`🌐 Fetch wrapper: ${modified ? 'MODIFIED' : 'no change'} (${toolMode ? 'tool' : 'lite'} mode)`)
+        logToFile(`🌐 Fetch wrapper: ${modified ? "MODIFIED" : "no change"} (${toolMode ? "tool" : "lite"} mode)`)
       }
 
       // Handle Anthropic format
@@ -63,7 +62,8 @@ export function initializeFetchWrapper(config: FetchWrapperConfig) {
     return originalFetch(input, init)
   }
 
-  logToFile(`🌐 Fetch wrapper initialized for models: ${TARGET_MODELS.join(", ")}`)
+  logToFile(`🌐 Fetch wrapper initialized`, "DEBUG")
+  logTargetModels((config as any).targetModels)
 }
 
 // OpenAI message injection
@@ -76,24 +76,24 @@ function injectIntoOpenAIMessages(messages: any[], prefix: string): boolean {
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i]
 
-    if (msg.role === 'tool' || msg.role === 'function') {
+    if (msg.role === "tool" || msg.role === "function") {
       const failed = isToolOutputFailed(msg.content)
       messages.splice(i + 1, 0, {
-        role: 'user',
-        content: buildThinkingPrompt(prefix, failed)
+        role: "user",
+        content: buildThinkingPrompt(prefix, failed),
       })
       modified = true
       i++
       continue
     }
 
-    if (msg.role === 'user' && Array.isArray(msg.content)) {
-      const hasToolResult = msg.content.some((part: any) => part.type === 'tool_result')
+    if (msg.role === "user" && Array.isArray(msg.content)) {
+      const hasToolResult = msg.content.some((part: any) => part.type === "tool_result")
       if (hasToolResult) {
-        const failed = msg.content.some((part: any) => part.type === 'tool_result' && isToolOutputFailed(part.content))
+        const failed = msg.content.some((part: any) => part.type === "tool_result" && isToolOutputFailed(part.content))
         messages.splice(i + 1, 0, {
-          role: 'user',
-          content: buildThinkingPrompt(prefix, failed)
+          role: "user",
+          content: buildThinkingPrompt(prefix, failed),
         })
         modified = true
         i++
@@ -106,8 +106,8 @@ function injectIntoOpenAIMessages(messages: any[], prefix: string): boolean {
   if (!modified) {
     for (let i = messages.length - 1; i >= 0; i--) {
       const msg = messages[i]
-      if (msg.role === 'user') {
-        if (typeof msg.content === 'string') {
+      if (msg.role === "user") {
+        if (typeof msg.content === "string") {
           if (!msg.content.startsWith(prefix)) {
             msg.content = prefix + msg.content
             return true
@@ -115,7 +115,7 @@ function injectIntoOpenAIMessages(messages: any[], prefix: string): boolean {
         } else if (Array.isArray(msg.content)) {
           let injected = false
           for (const part of msg.content) {
-            if (part.type === 'text' && typeof part.text === 'string') {
+            if (part.type === "text" && typeof part.text === "string") {
               if (!part.text.startsWith(prefix)) {
                 part.text = prefix + part.text
                 injected = true
@@ -135,8 +135,8 @@ function injectIntoOpenAIMessages(messages: any[], prefix: string): boolean {
 function injectLitePrefix(messages: any[], prefix: string): boolean {
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i]
-    if (msg.role === 'user') {
-      if (typeof msg.content === 'string') {
+    if (msg.role === "user") {
+      if (typeof msg.content === "string") {
         if (!msg.content.startsWith(prefix)) {
           msg.content = prefix + msg.content
           return true
@@ -144,7 +144,7 @@ function injectLitePrefix(messages: any[], prefix: string): boolean {
       } else if (Array.isArray(msg.content)) {
         let injected = false
         for (const part of msg.content) {
-          if (part.type === 'text' && typeof part.text === 'string') {
+          if (part.type === "text" && typeof part.text === "string") {
             if (!part.text.startsWith(prefix)) {
               part.text = prefix + part.text
               injected = true
@@ -165,13 +165,13 @@ function injectIntoAnthropicMessages(messages: any[], prefix: string): boolean {
   let modified = false
 
   for (const msg of messages) {
-    if (msg.role === 'user' && Array.isArray(msg.content)) {
-      const toolParts = msg.content.filter((part: any) => part.type === 'tool_result')
+    if (msg.role === "user" && Array.isArray(msg.content)) {
+      const toolParts = msg.content.filter((part: any) => part.type === "tool_result")
       if (toolParts.length > 0) {
         const failed = toolParts.some((part: any) => isToolOutputFailed(part.content))
         msg.content.push({
-          type: 'text',
-          text: "\n\n" + buildThinkingPrompt(prefix, failed)
+          type: "text",
+          text: "\n\n" + buildThinkingPrompt(prefix, failed),
         })
         modified = true
       }
@@ -181,9 +181,9 @@ function injectIntoAnthropicMessages(messages: any[], prefix: string): boolean {
   if (!modified) {
     for (let i = messages.length - 1; i >= 0; i--) {
       const msg = messages[i]
-      if (msg.role === 'user' && Array.isArray(msg.content)) {
+      if (msg.role === "user" && Array.isArray(msg.content)) {
         for (const part of msg.content) {
-          if (part.type === 'text' && typeof part.text === 'string') {
+          if (part.type === "text" && typeof part.text === "string") {
             if (!part.text.startsWith(prefix)) {
               part.text = prefix + part.text
               return true
@@ -203,7 +203,7 @@ function isToolOutputFailed(content: any): boolean {
 
   const checkString = (text: string): boolean => {
     const lower = text.toLowerCase()
-    if (failWords.some(w => lower.includes(w))) return true
+    if (failWords.some((w) => lower.includes(w))) return true
     try {
       const parsed = JSON.parse(text)
       return isToolOutputFailed(parsed)
@@ -212,22 +212,22 @@ function isToolOutputFailed(content: any): boolean {
     }
   }
 
-  if (typeof content === 'string') return checkString(content)
+  if (typeof content === "string") return checkString(content)
 
   if (Array.isArray(content)) {
-    return content.some(part => {
-      if (typeof part === 'string') return checkString(part)
-      if (part?.text && typeof part.text === 'string') return checkString(part.text)
+    return content.some((part) => {
+      if (typeof part === "string") return checkString(part)
+      if (part?.text && typeof part.text === "string") return checkString(part.text)
       return false
     })
   }
 
-  if (content && typeof content === 'object') {
+  if (content && typeof content === "object") {
     const status = (content.status || content.state || content.result || content.error)?.toString().toLowerCase?.()
     if (status && !["completed", "success", "succeeded", "ok", "done"].includes(status)) return true
 
     return Object.values(content).some((v: any) => {
-      if (typeof v === 'string') return checkString(v)
+      if (typeof v === "string") return checkString(v)
       return false
     })
   }

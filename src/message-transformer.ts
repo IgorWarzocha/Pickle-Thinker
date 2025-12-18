@@ -219,7 +219,7 @@ export function createTransformHandler(config: any, hookState: any = {}) {
 
     const sessionID = getSessionIDFromMessages(output.messages)
     const modelKey = getModelKeyFromMessages(output.messages)
-    const enhance = shouldEnhanceModel(modelKey)
+    const enhance = shouldEnhanceModel(modelKey, (config as any).targetModels)
 
     if (sessionID) {
       setSessionEnhanceState(sessionID, enhance, modelKey)
