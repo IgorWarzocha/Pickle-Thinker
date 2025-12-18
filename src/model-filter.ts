@@ -5,7 +5,7 @@
 
 import { logToFile } from "./logger.js"
 
-export const TARGET_MODELS = ["glm-4.6", "big-pickle"]
+export const TARGET_MODELS = ["glm-4.6", "zai/glm-4.6", "zai-coding-plan/glm-4.6", "big-pickle", "opencode/big-pickle"]
 
 export function shouldEnhanceModel(modelId: string): boolean {
   const shouldEnhance = TARGET_MODELS.some(target => modelId.includes(target))
