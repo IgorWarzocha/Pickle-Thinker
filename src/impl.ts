@@ -7,6 +7,8 @@ import type { Plugin } from "@opencode-ai/plugin"
 import { getConfig } from "./config.js"
 import { createTransformHandler } from "./message-transformer.js"
 import { createToolExecuteHook } from "./tool-handler.js"
+import { createSystemTransformHandler } from "./system-transformer.js"
+import { createSessionCompactionHandler } from "./session-compaction.js"
 import { clearLogFile, logToFile, setDebugMode } from "./logger.js"
 import { initializeFetchWrapper } from "./fetch-wrapper.js"
 import { logTargetModels } from "./model-filter.js"
@@ -85,16 +87,20 @@ export const implementation: Plugin = async (ctx) => {
     flushEventCounts() // Try to flush if conditions are met
   }
 
+  // Hook to inject thinking into system prompt
+  hooks["experimental.chat.system.transform"] = createSystemTransformHandler(config)
+
   // Hook to transform messages and inject thinking prompts (current approach)
   hooks["experimental.chat.messages.transform"] = createTransformHandler(config, hookState)
 
   // Hook to inject thinking during tool execution chains (current approach)
   hooks["tool.execute.after"] = createToolExecuteHook(config, hookState)
 
+  // Hook to inject thinking during session compaction
+  hooks["experimental.session.compacting"] = createSessionCompactionHandler(config)
+
   logToFile(`PLUGIN LOADED WITH HOOKS: ${Object.keys(hooks).join(", ")}`, "DEBUG")
   logTargetModels()
   logToFile(`🔄 Hybrid system initialized (fetch wrapper + hooks)`, "DEBUG")
   return hooks
 }
-
-
