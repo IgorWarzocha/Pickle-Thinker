@@ -1,4 +1,4 @@
 {
-  "plugin": ["./.opencode/plugin/ultrathink-plugin"],
+  "plugin": ["./.opencode/plugins/pickle-thinker"],
   "$schema": "https://opencode.ai/config.json"
 }

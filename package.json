@@ -1,15 +1,19 @@
 {
   "name": "@howaboua/pickle-thinker",
-  "version": "0.1.2",
+  "version": "0.3.0",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "files": [ "dist", "README.md", "LICENSE" ],
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "peerDependencies": {
     "@opencode-ai/plugin": "^1.0.0"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.json",
     "prepublishOnly": "npm run build"
   },
   "devDependencies": {

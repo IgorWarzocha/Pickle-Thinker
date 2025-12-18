@@ -1,27 +1,21 @@
 /**
- * Ultrathink Plugin - Injects "Ultrathink: " before user prompts
+ * Fetch wrapper implementation from master branch
+ * Intercepts API calls to inject thinking prompts before they reach the AI model
  */
 
-import type { Plugin } from "@opencode-ai/plugin"
-import { getConfig } from "./config.js"
+import { logToFile } from "./logger.js"
+import { TARGET_MODELS, shouldEnhanceModel } from "./model-filter.js"
 
-interface UltrathinkConfig {
+interface FetchWrapperConfig {
   enabled: boolean
   prefix: string
+  mode: "lite" | "tool"
 }
 
-export const implementation: Plugin = async (ctx) => {
-  const config = getConfig(ctx)
-
-  // Target models that should receive the ultrathink prefix
-  const targetModels = [
-    "glm-4.6",
-    "big-pickle"
-  ]
+export function initializeFetchWrapper(config: FetchWrapperConfig) {
 
   const originalFetch = globalThis.fetch
 
-  // Install fetch wrapper to intercept API calls
   globalThis.fetch = async (input: any, init?: any) => {
     if (!config.enabled || !init?.body || typeof init.body !== 'string') {
       return originalFetch(input, init)
@@ -30,19 +24,15 @@ export const implementation: Plugin = async (ctx) => {
     try {
       const body = JSON.parse(init.body)
       
-      
-
-      
       // Check if this request is for a target model
       const modelId = body.model || ''
-      const shouldEnhance = targetModels.some(target => modelId.includes(target))
+      const shouldEnhance = shouldEnhanceModel(modelId)
       
       if (!shouldEnhance) {
         return originalFetch(input, init)
       }
       
       let modified = false
-
       const toolMode = config.mode === 'tool'
 
       // Handle OpenAI Chat Completions format
@@ -50,35 +40,39 @@ export const implementation: Plugin = async (ctx) => {
         modified = toolMode
           ? injectIntoOpenAIMessages(body.messages, config.prefix)
           : injectLitePrefix(body.messages, config.prefix)
+        logToFile(`🌐 Fetch wrapper: ${modified ? 'MODIFIED' : 'no change'} (${toolMode ? 'tool' : 'lite'} mode)`)
       }
 
       // Handle Anthropic format
       if (toolMode && body.messages && Array.isArray(body.messages)) {
-        modified = injectIntoAnthropicMessages(body.messages, config.prefix) || modified
+        const anthropicModified = injectIntoAnthropicMessages(body.messages, config.prefix)
+        modified = anthropicModified || modified
+        if (anthropicModified) {
+          logToFile(`🌐 Fetch wrapper: MODIFIED (Anthropic format)`)
+        }
       }
 
       if (modified) {
         init.body = JSON.stringify(body)
       }
     } catch (error) {
+      logToFile(`🌐 Fetch wrapper error: ${error}`, "DEBUG")
       // If parsing fails, continue with original request
     }
 
     return originalFetch(input, init)
   }
 
-  return {
-    // Plugin initialized successfully
-  }
+  logToFile(`🌐 Fetch wrapper initialized for models: ${TARGET_MODELS.join(", ")}`)
 }
 
+// OpenAI message injection
 function injectIntoOpenAIMessages(messages: any[], prefix: string): boolean {
   if (messages.length === 0) return false
 
   let modified = false
 
   // Insert a thinking prompt immediately after every tool output.
-  // NOTE: Heuristic failure detection; disable/change if it misfires.
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i]
 
@@ -96,7 +90,6 @@ function injectIntoOpenAIMessages(messages: any[], prefix: string): boolean {
     if (msg.role === 'user' && Array.isArray(msg.content)) {
       const hasToolResult = msg.content.some((part: any) => part.type === 'tool_result')
       if (hasToolResult) {
-        // If multiple tool_result parts exist, insert one consolidated prompt after the message.
         const failed = msg.content.some((part: any) => part.type === 'tool_result' && isToolOutputFailed(part.content))
         messages.splice(i + 1, 0, {
           role: 'user',
@@ -165,6 +158,7 @@ function injectLitePrefix(messages: any[], prefix: string): boolean {
   return false
 }
 
+// Anthropic message injection
 function injectIntoAnthropicMessages(messages: any[], prefix: string): boolean {
   if (messages.length === 0) return false
 
@@ -203,8 +197,7 @@ function injectIntoAnthropicMessages(messages: any[], prefix: string): boolean {
   return modified
 }
 
-// Heuristic: try to guess whether a tool output represents a failure.
-// Safe to remove/disable if noisy.
+// Failure detection heuristic
 function isToolOutputFailed(content: any): boolean {
   const failWords = ["error", "failed", "exception", "traceback", "stack", "not found"]
 
@@ -233,7 +226,6 @@ function isToolOutputFailed(content: any): boolean {
     const status = (content.status || content.state || content.result || content.error)?.toString().toLowerCase?.()
     if (status && !["completed", "success", "succeeded", "ok", "done"].includes(status)) return true
 
-    // Inspect stringified fields
     return Object.values(content).some((v: any) => {
       if (typeof v === 'string') return checkString(v)
       return false
@@ -243,6 +235,7 @@ function isToolOutputFailed(content: any): boolean {
   return false
 }
 
+// Build thinking prompt based on failure status
 function buildThinkingPrompt(prefix: string, failed: boolean): string {
   if (failed) {
     return `${prefix}Tool output failed. Consider re-running the tool or re-reading the file before editing it.`

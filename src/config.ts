@@ -1,42 +1,42 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync } from 'fs'
-import { homedir } from 'os'
-import { dirname, join } from 'path'
-import type { PluginInput } from '@opencode-ai/plugin'
+import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync } from "fs"
+import { homedir } from "os"
+import { dirname, join } from "path"
+import type { PluginInput } from "@opencode-ai/plugin"
 
-export type UltrathinkMode = 'lite' | 'tool'
+export type UltrathinkMode = "lite" | "tool"
 
 export interface UltrathinkConfig {
   enabled: boolean
   prefix: string
   mode: UltrathinkMode
+  debug?: boolean
 }
 
-const GLOBAL_DIR = join(homedir(), '.config', 'opencode')
-const GLOBAL_JSONC = join(GLOBAL_DIR, 'pickle-thinker.jsonc')
-const GLOBAL_JSON = join(GLOBAL_DIR, 'pickle-thinker.json')
+const GLOBAL_DIR = join(homedir(), ".config", "opencode")
+const GLOBAL_JSONC = join(GLOBAL_DIR, "pickle-thinker.jsonc")
+const GLOBAL_JSON = join(GLOBAL_DIR, "pickle-thinker.json")
 
 const defaultConfig: UltrathinkConfig = {
   enabled: true,
-  prefix: 'Ultrathink: ',
-  mode: 'tool'
+  prefix: "Ultrathink: ",
+  mode: "tool",
+  debug: false,
 }
 
 function stripCommentsAndTrailingCommas(text: string): string {
   // Remove /* ... */ and // ... comments so JSON.parse can be used.
-  let cleaned = text
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/(^|[^:])\/\/.*$/gm, '$1')
+  let cleaned = text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1")
 
   // Remove trailing commas before } or ]
-  cleaned = cleaned.replace(/,\s*([}\]])/g, '$1')
+  cleaned = cleaned.replace(/,\s*([}\]])/g, "$1")
   return cleaned
 }
 
 function findOpencodeDir(startDir?: string): string | null {
   if (!startDir) return null
   let current = startDir
-  while (current !== '/') {
-    const candidate = join(current, '.opencode')
+  while (current !== "/") {
+    const candidate = join(current, ".opencode")
     if (existsSync(candidate) && statSync(candidate).isDirectory()) return candidate
     const parent = dirname(current)
     if (parent === current) break
@@ -47,7 +47,7 @@ function findOpencodeDir(startDir?: string): string | null {
 
 function loadConfigFile(path: string): Partial<UltrathinkConfig> | null {
   try {
-    const raw = readFileSync(path, 'utf-8')
+    const raw = readFileSync(path, "utf-8")
     const parsed = JSON.parse(stripCommentsAndTrailingCommas(raw))
     return parsed
   } catch {
@@ -67,20 +67,22 @@ function ensureDefaultConfig(): void {
   "enabled": true,
   // "lite" | "tool"
   "mode": "tool",
-  // Change the thinking keyword if you like
-  "prefix": "Ultrathink: "
+  // Change thinking keyword if you like
+  "prefix": "Ultrathink: ",
+  // Enable debug logging to console/file
+  "debug": false
 }
 `
 
-  writeFileSync(GLOBAL_JSONC, content, 'utf-8')
+  writeFileSync(GLOBAL_JSONC, content, "utf-8")
 }
 
 function getConfigPath(ctx?: PluginInput): string | null {
   // Prefer project-level config if present
   const projectDir = findOpencodeDir(ctx?.directory)
   if (projectDir) {
-    const pj = join(projectDir, 'pickle-thinker.jsonc')
-    const pjJson = join(projectDir, 'pickle-thinker.json')
+    const pj = join(projectDir, "pickle-thinker.jsonc")
+    const pjJson = join(projectDir, "pickle-thinker.json")
     if (existsSync(pj)) return pj
     if (existsSync(pjJson)) return pjJson
   }
@@ -100,9 +102,10 @@ export function getConfig(ctx?: PluginInput): UltrathinkConfig {
   if (!loaded) return { ...defaultConfig }
 
   // Defensive: keep defaults if a key is the wrong type
-  const enabled = typeof loaded.enabled === 'boolean' ? loaded.enabled : defaultConfig.enabled
-  const prefix = typeof loaded.prefix === 'string' ? loaded.prefix : defaultConfig.prefix
-  const mode = loaded.mode === 'lite' || loaded.mode === 'tool' ? loaded.mode : defaultConfig.mode
+  const enabled = typeof loaded.enabled === "boolean" ? loaded.enabled : defaultConfig.enabled
+  const prefix = typeof loaded.prefix === "string" ? loaded.prefix : defaultConfig.prefix
+  const mode = loaded.mode === "lite" || loaded.mode === "tool" ? loaded.mode : defaultConfig.mode
+  const debug = typeof loaded.debug === "boolean" ? loaded.debug : defaultConfig.debug
 
-  return { enabled, prefix, mode }
+  return { enabled, prefix, mode, debug }
 }
