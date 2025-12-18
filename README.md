@@ -1,115 +1,70 @@
 # Pickle-Thinker
 
-OpenCode plugin for GLM-4.6 / Big Pickle that auto-adds a steering prefix—set it to “Ultrathink:” or... any other reminder you want.
+OpenCode plugin for GLM-4.6 / Big Pickle that reliably injects the magic keyword `Ultrathink` so these models consistently enter “thinking mode”.
 
 <img width="1024" height="559" alt="image" src="https://github.com/user-attachments/assets/c0975190-b6d7-4f8a-8fd3-c6850405cabd" />
 
 Two modes (default: **tool**):
 
-- **lite**: prefix the latest user message only.
-- **tool**: after every tool call, inject a follow-up prompt; uses two variants (normal vs. failure-heuristic) for post-tool steering.
+- **lite** (legacy): prefix only the latest user message.
+- **tool** (recommended): redundancy-first injection so `Ultrathink` shows up in all the important places (user turns + tool returns).
+
+## Configuration
 
 Config lives in `~/.config/opencode/pickle-thinker.jsonc` (auto-created) or `.opencode/pickle-thinker.jsonc` per project:
 
 ```jsonc
 {
-  // mode: "lite" keeps single-prefix behavior.
-  // mode: "tool" adds an extra user turn after each tool result (more turns/tokens).
   "enabled": true,
+  // "lite" | "tool"
   "mode": "tool",
+  // NOTE: `Ultrathink` is the magic word for these models.
+  // If you set `prefix` to something else, the plugin still forces `Ultrathink`.
   "prefix": "Ultrathink: ",
   "debug": false,
 }
 ```
 
-Heads-up: tool mode increases turns/tokens and may affect subscription usage.
+Heads-up: `tool` mode increases turns/tokens and may affect subscription usage.
 
-### Steering hacks
+## How It Works
 
-- Set `prefix` to anything you like, e.g. `prefix: "Responde solo en español: "` to force language, or `prefix: "Read the docs before answering: "` to nudge behavior. You can drop the word “Ultrathink” entirely if you want.
-  This behaves like a lightweight user-prompt hook (similar to Claude Code’s UserPromptSubmit), letting you bake reminders or constraints into every turn.
+This plugin only activates for the target models (GLM-4.6 + Big Pickle). For those models:
+
+- **Every user message is forced to start with `Ultrathink`** (as a dedicated leading text part).
+- **After tool results**, the plugin injects a synthetic user “continue + ultrathink” message so the model can think _between_ tool calls.
+- **Tool outputs and tool errors are also appended with an `Ultrathink` block** as an extra safety net.
+
+Duplication is intentional; missing `Ultrathink` is the bug.
+
+### Notes on prefix
+
+- `Ultrathink` is required for GLM-4.6 / Big Pickle to think.
+- You can still customize `prefix`, but the plugin ensures the first token the model sees is `Ultrathink`.
 
 ## Installation
-
-### Option 1: npm (when published)
 
 Add to your repository `opencode.json` or user-level `~/.config/opencode/opencode.json`:
 
 ```json
 {
-  "plugin": ["@howaboua/pickle-thinker@0.2.1"]
+  "plugin": ["@howaboua/pickle-thinker@0.3.0"]
 }
 ```
 
-### Option 2: Manual folder install (for testing)
-
-1. Build the plugin: `bun run build`
-2. Copy the plugin folder to your target project:
-
-```bash
-# Option A: Install to specific project
-cp -r /path/to/pickle-thinker/dist /your/project/.opencode/plugins/pickle-thinker
-
-# Option B: Install to user-level plugins
-mkdir -p ~/.config/opencode/plugins/pickle-thinker
-cp -r /path/to/pickle-thinker/dist/* ~/.config/opencode/plugins/pickle-thinker/
-```
-
-3. Add to your `opencode.json`:
-
-```json
-{
-  "plugin": ["./.opencode/plugins/pickle-thinker"]
-}
-```
-
-or for user-level:
-
-```json
-{
-  "plugin": ["~/.config/opencode/plugins/pickle-thinker"]
-}
-```
-
-### Option 3: Git submodule (for development)
-
-```bash
-cd your-project
-git submodule add https://github.com/howaboua/pickle-thinker .opencode/plugins/pickle-thinker
-cd .opencode/plugins/pickle-thinker
-bun run build
-```
-
-Then add to `opencode.json`:
-
-```json
-{
-  "plugin": ["./.opencode/plugins/pickle-thinker"]
-}
-```
-
-## How It Works
-
-**Hybrid Architecture**: Uses dual-approach injection for maximum compatibility:
-- **Fetch wrapper**: Intercepts API calls before they reach the model (master approach)
-- **OpenCode hooks**: Transforms messages in the OpenCode pipeline (interleaved approach)
-
-**Model filtering**: Only runs for `glm-4.6` and `big-pickle` models.
-
-- Only runs for `glm-4.6` and `big-pickle`.
-- Lite mode: prepend `prefix` to the most recent user message.
-- Tool mode: insert `prefix` after each tool output; if the tool output looks like an error, swap to a “failed” prompt.
+Other installation methods (manual folder installs, submodules) are intentionally unsupported/legacy as of `0.3.0`.
 
 ## Examples
 
-- Lite mode (prefix only):  
-  `User: Ultrathink: Explain quantum computing`
+- User turn (forced):
+  - First thing the model sees in each user message: `Ultrathink`
 
-- Tool mode (auto-injected after a tool call):  
-  `Ultrathink: Analyze the tool output and continue.`
+- After any tool result (synthetic interleave turn):
+  - `Ultrathink\n\nContinue.`
+  - `Ultrathink\n\nReview the tool output carefully, then continue.`
 
-- Tool mode (failure heuristic fired):  
-  `Ultrathink: Tool output failed. Consider re-running the tool or re-reading the file before editing it.`
+- Tool output appended (extra safety net):
+  - Tool output will also contain an `Ultrathink` block (with a small marker tag) so even “weird” tool flows still surface the keyword.
 
 ## Acknowledgments
 
