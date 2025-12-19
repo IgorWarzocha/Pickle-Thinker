@@ -15,6 +15,7 @@ import { logToFile } from "./logger.js"
 import { shouldEnhanceModel } from "./model-filter.js"
 import { isToolOutputFailed } from "./utils.js"
 import { setSessionEnhanceState } from "./session-state.js"
+import { fixAllMessageIssues } from "./tool-interceptor.js"
 
 type AnyMessage = MessageWithParts & {
   info: any
@@ -112,19 +113,32 @@ function assistantHasToolParts(message: AnyMessage): { hasTool: boolean; failed:
   if (message.info?.role !== "assistant") return { hasTool: false, failed: false }
   if (!Array.isArray(message.parts)) return { hasTool: false, failed: false }
 
-  let hasTool = false
+  let hasToolFallback = false
   let failed = false
+  let stepFinishReason: string | undefined
 
   for (const part of message.parts) {
-    if (part?.type !== "tool") continue
-    const status = part?.state?.status
-    if (status === "completed") {
-      hasTool = true
+    if (part?.type === "step-finish") {
+      stepFinishReason = part.reason
     }
-    if (status === "error") {
-      hasTool = true
-      failed = true
+
+    if (part?.type === "tool") {
+      const status = part?.state?.status
+      if (status === "completed") {
+        hasToolFallback = true
+      }
+      if (status === "error") {
+        hasToolFallback = true
+        failed = true
+      }
     }
+  }
+
+  let hasTool = false
+  if (stepFinishReason) {
+    hasTool = stepFinishReason === "tool-calls"
+  } else {
+    hasTool = hasToolFallback
   }
 
   return { hasTool, failed }
@@ -234,11 +248,19 @@ export function createTransformHandler(config: any, hookState: any = {}) {
     const prefixText = getUltrathinkPrefixText(prefix) + "\n\n"
 
     const toolMode = config.mode === "tool"
+    const interceptTools = config.interceptToolsInThinking === true
     const initialMessageCount = output.messages.length
 
     let userPrefixCount = 0
     let toolPartAppends = 0
     let toolTurnInjections = 0
+    let thinkingFixes = 0
+
+    // Fix tools mistakenly placed in thinking blocks first
+    if (interceptTools) {
+      const fixResult = fixAllMessageIssues(output.messages)
+      thinkingFixes = fixResult.thinkingFixes + fixResult.toolFixes
+    }
 
     if (toolMode) {
       userPrefixCount = ensureUltrathinkOnAllUserMessages(output.messages, prefixText)
@@ -250,10 +272,10 @@ export function createTransformHandler(config: any, hookState: any = {}) {
 
     const duration = Date.now() - startTime
 
-    if (userPrefixCount > 0 || toolPartAppends > 0 || toolTurnInjections > 0) {
+    if (userPrefixCount > 0 || toolPartAppends > 0 || toolTurnInjections > 0 || thinkingFixes > 0) {
       hookState.messageTransform.lastSuccess = Date.now()
       logToFile(
-        `✅ Ultrathink injected (mode=${toolMode ? "tool" : "lite"}, model=${modelKey}, prefixed=${userPrefixCount}, toolPartAppends=${toolPartAppends}, toolTurns=${toolTurnInjections}, ${duration}ms, ${initialMessageCount}→${output.messages.length} messages)`,
+        `✅ Ultrathink injected (mode=${toolMode ? "tool" : "lite"}, model=${modelKey}, prefixed=${userPrefixCount}, toolPartAppends=${toolPartAppends}, toolTurns=${toolTurnInjections}, thinkingFixes=${thinkingFixes}, ${duration}ms, ${initialMessageCount}→${output.messages.length} messages)`,
       )
     } else {
       logToFile(`⚠️ No changes (mode=${toolMode ? "tool" : "lite"}, model=${modelKey}, ${duration}ms)`, "DEBUG")

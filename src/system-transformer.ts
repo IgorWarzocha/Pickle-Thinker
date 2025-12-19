@@ -4,6 +4,7 @@
  */
 
 import { logToFile } from "./logger.js"
+import { getUltrathinkPrefixText } from "./thinking-prompts.js"
 
 export function createSystemTransformHandler(config: any) {
   return async (_: any, output: { system: string[] }) => {
@@ -14,8 +15,8 @@ export function createSystemTransformHandler(config: any) {
       return
     }
 
-    const thinkingInstructions =
-      "Ultrathink at all times. Do not reply unless you are thinking deeply about the task at hand."
+    const prefix = getUltrathinkPrefixText(config.prefix)
+    const thinkingInstructions = `${prefix} at all times. Do not reply unless you are thinking deeply about the task at hand.`
 
     output.system.push(thinkingInstructions)
 

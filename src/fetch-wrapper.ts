@@ -1,18 +1,21 @@
 /**
- * Fetch wrapper implementation from master branch
- * Intercepts API calls to inject thinking prompts before they reach the AI model
+ * Fetch wrapper for Ultrathink.
+ * Mutates outbound requests in lite mode and sanitizes inbound streaming responses to recover malformed tool calls.
  */
 
 import { logToFile } from "./logger.js"
 import { shouldEnhanceModel, logTargetModels } from "./model-filter.js"
+import {
+  injectIntoAnthropicMessages,
+  injectIntoOpenAIMessages,
+  injectLitePrefix,
+} from "./fetch-wrapper/request-injector.js"
+import { sanitizeModelResponse } from "./fetch-wrapper/response-sanitizer.js"
+import type { FetchWrapperConfig, FetchWrapperOptions } from "./fetch-wrapper/types.js"
 
-interface FetchWrapperConfig {
-  enabled: boolean
-  prefix: string
-  mode: "lite" | "tool"
-}
+export type { FetchWrapperConfig, FetchWrapperOptions }
 
-export function initializeFetchWrapper(config: FetchWrapperConfig) {
+export function initializeFetchWrapper(config: FetchWrapperConfig, options: FetchWrapperOptions = {}) {
   const originalFetch = globalThis.fetch
 
   globalThis.fetch = async (input: any, init?: any) => {
@@ -20,225 +23,69 @@ export function initializeFetchWrapper(config: FetchWrapperConfig) {
       return originalFetch(input, init)
     }
 
-    try {
-      const body = JSON.parse(init.body)
+    const parsedBody = parseJson(init.body)
+    const modelId = typeof parsedBody?.model === "string" ? parsedBody.model : ""
 
-      // Check if this request is for a target model
-      const modelId = body.model || ""
-      const shouldEnhance = shouldEnhanceModel(modelId, (config as any).targetModels)
-
-      if (!shouldEnhance) {
-        return originalFetch(input, init)
-      }
-
-      let modified = false
-      const toolMode = config.mode === "tool"
-
-      // Handle OpenAI Chat Completions format
-      if (body.messages && Array.isArray(body.messages)) {
-        modified = toolMode
-          ? injectIntoOpenAIMessages(body.messages, config.prefix)
-          : injectLitePrefix(body.messages, config.prefix)
-        logToFile(`🌐 Fetch wrapper: ${modified ? "MODIFIED" : "no change"} (${toolMode ? "tool" : "lite"} mode)`)
-      }
-
-      // Handle Anthropic format
-      if (toolMode && body.messages && Array.isArray(body.messages)) {
-        const anthropicModified = injectIntoAnthropicMessages(body.messages, config.prefix)
-        modified = anthropicModified || modified
-        if (anthropicModified) {
-          logToFile(`🌐 Fetch wrapper: MODIFIED (Anthropic format)`)
-        }
-      }
-
-      if (modified) {
-        init.body = JSON.stringify(body)
-      }
-    } catch (error) {
-      logToFile(`🌐 Fetch wrapper error: ${error}`, "DEBUG")
-      // If parsing fails, continue with original request
+    if (!shouldEnhanceModel(modelId, config.targetModels ?? [])) {
+      return originalFetch(input, init)
     }
 
-    return originalFetch(input, init)
+    const injectRequests = options.injectRequests === true
+    const sanitizeResponses = options.sanitizeResponses === true
+
+    if (injectRequests && parsedBody) {
+      try {
+        const toolMode = config.mode === "tool"
+
+        if (Array.isArray(parsedBody.messages)) {
+          const modified = toolMode
+            ? injectIntoOpenAIMessages(parsedBody.messages, config.prefix, toolMode)
+            : injectLitePrefix(parsedBody.messages, config.prefix)
+
+          if (modified) {
+            init.body = JSON.stringify(parsedBody)
+          }
+        }
+
+        if (toolMode && Array.isArray(parsedBody.messages)) {
+          const modified = injectIntoAnthropicMessages(parsedBody.messages, config.prefix, toolMode)
+          if (modified) {
+            init.body = JSON.stringify(parsedBody)
+          }
+        }
+      } catch (error) {
+        logToFile(`🌐 Fetch wrapper request injection error: ${error}`, "DEBUG")
+      }
+    }
+
+    const response = await originalFetch(input, init)
+
+    if (!sanitizeResponses) {
+      return response
+    }
+
+    try {
+      const likelySse = parsedBody?.stream === true
+      return await sanitizeModelResponse(response, {
+        likelySse,
+        onToolCallRewritten(toolName) {
+          logToFile(`🧽 Sanitized malformed <tool_call> into function_call: ${toolName}`)
+        },
+      })
+    } catch (error) {
+      logToFile(`🌐 Fetch wrapper response sanitize error: ${error}`, "DEBUG")
+      return response
+    }
   }
 
   logToFile(`🌐 Fetch wrapper initialized`, "DEBUG")
-  logTargetModels((config as any).targetModels)
+  logTargetModels(config.targetModels ?? [])
 }
 
-// OpenAI message injection
-function injectIntoOpenAIMessages(messages: any[], prefix: string): boolean {
-  if (messages.length === 0) return false
-
-  let modified = false
-
-  // Insert a thinking prompt immediately after every tool output.
-  for (let i = 0; i < messages.length; i++) {
-    const msg = messages[i]
-
-    if (msg.role === "tool" || msg.role === "function") {
-      const failed = isToolOutputFailed(msg.content)
-      messages.splice(i + 1, 0, {
-        role: "user",
-        content: buildThinkingPrompt(prefix, failed),
-      })
-      modified = true
-      i++
-      continue
-    }
-
-    if (msg.role === "user" && Array.isArray(msg.content)) {
-      const hasToolResult = msg.content.some((part: any) => part.type === "tool_result")
-      if (hasToolResult) {
-        const failed = msg.content.some((part: any) => part.type === "tool_result" && isToolOutputFailed(part.content))
-        messages.splice(i + 1, 0, {
-          role: "user",
-          content: buildThinkingPrompt(prefix, failed),
-        })
-        modified = true
-        i++
-        continue
-      }
-    }
+function parseJson(raw: string): any | null {
+  try {
+    return JSON.parse(raw)
+  } catch {
+    return null
   }
-
-  // Preserve original behavior: ensure last user message gets the prefix at least once.
-  if (!modified) {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const msg = messages[i]
-      if (msg.role === "user") {
-        if (typeof msg.content === "string") {
-          if (!msg.content.startsWith(prefix)) {
-            msg.content = prefix + msg.content
-            return true
-          }
-        } else if (Array.isArray(msg.content)) {
-          let injected = false
-          for (const part of msg.content) {
-            if (part.type === "text" && typeof part.text === "string") {
-              if (!part.text.startsWith(prefix)) {
-                part.text = prefix + part.text
-                injected = true
-              }
-            }
-          }
-          if (injected) return true
-        }
-      }
-    }
-  }
-
-  return modified
-}
-
-// Lite mode: only ensure latest user message is prefixed
-function injectLitePrefix(messages: any[], prefix: string): boolean {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const msg = messages[i]
-    if (msg.role === "user") {
-      if (typeof msg.content === "string") {
-        if (!msg.content.startsWith(prefix)) {
-          msg.content = prefix + msg.content
-          return true
-        }
-      } else if (Array.isArray(msg.content)) {
-        let injected = false
-        for (const part of msg.content) {
-          if (part.type === "text" && typeof part.text === "string") {
-            if (!part.text.startsWith(prefix)) {
-              part.text = prefix + part.text
-              injected = true
-            }
-          }
-        }
-        if (injected) return true
-      }
-    }
-  }
-  return false
-}
-
-// Anthropic message injection
-function injectIntoAnthropicMessages(messages: any[], prefix: string): boolean {
-  if (messages.length === 0) return false
-
-  let modified = false
-
-  for (const msg of messages) {
-    if (msg.role === "user" && Array.isArray(msg.content)) {
-      const toolParts = msg.content.filter((part: any) => part.type === "tool_result")
-      if (toolParts.length > 0) {
-        const failed = toolParts.some((part: any) => isToolOutputFailed(part.content))
-        msg.content.push({
-          type: "text",
-          text: "\n\n" + buildThinkingPrompt(prefix, failed),
-        })
-        modified = true
-      }
-    }
-  }
-
-  if (!modified) {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const msg = messages[i]
-      if (msg.role === "user" && Array.isArray(msg.content)) {
-        for (const part of msg.content) {
-          if (part.type === "text" && typeof part.text === "string") {
-            if (!part.text.startsWith(prefix)) {
-              part.text = prefix + part.text
-              return true
-            }
-          }
-        }
-      }
-    }
-  }
-
-  return modified
-}
-
-// Failure detection heuristic
-function isToolOutputFailed(content: any): boolean {
-  const failWords = ["error", "failed", "exception", "traceback", "stack", "not found"]
-
-  const checkString = (text: string): boolean => {
-    const lower = text.toLowerCase()
-    if (failWords.some((w) => lower.includes(w))) return true
-    try {
-      const parsed = JSON.parse(text)
-      return isToolOutputFailed(parsed)
-    } catch {
-      return false
-    }
-  }
-
-  if (typeof content === "string") return checkString(content)
-
-  if (Array.isArray(content)) {
-    return content.some((part) => {
-      if (typeof part === "string") return checkString(part)
-      if (part?.text && typeof part.text === "string") return checkString(part.text)
-      return false
-    })
-  }
-
-  if (content && typeof content === "object") {
-    const status = (content.status || content.state || content.result || content.error)?.toString().toLowerCase?.()
-    if (status && !["completed", "success", "succeeded", "ok", "done"].includes(status)) return true
-
-    return Object.values(content).some((v: any) => {
-      if (typeof v === "string") return checkString(v)
-      return false
-    })
-  }
-
-  return false
-}
-
-// Build thinking prompt based on failure status
-function buildThinkingPrompt(prefix: string, failed: boolean): string {
-  if (failed) {
-    return `${prefix}Tool output failed. Consider re-running the tool or re-reading the file before editing it.`
-  }
-  return `${prefix}Analyze the tool output and continue.`
 }

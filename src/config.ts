@@ -11,6 +11,10 @@ export interface UltrathinkConfig {
   mode: UltrathinkMode
   debug?: boolean
   /**
+   * Detect and fix tools that are mistakenly placed within thinking blocks
+   */
+  interceptToolsInThinking?: boolean
+  /**
    * Model IDs (substring match) that should receive Ultrathink injections.
    * Matched against a `${providerID}/${modelID}` key.
    */
@@ -34,6 +38,7 @@ const defaultConfig: UltrathinkConfig = {
   prefix: "Ultrathink: ",
   mode: "tool",
   debug: false,
+  interceptToolsInThinking: true,
   targetModels: DEFAULT_TARGET_MODELS,
 }
 
@@ -85,6 +90,8 @@ function ensureDefaultConfig(): void {
   "prefix": "Ultrathink: ",
   // Enable debug logging to console/file
   "debug": false,
+  // Detect and fix tools that are mistakenly placed within thinking blocks
+  "interceptToolsInThinking": true,
   // Models to enhance (substring match against "providerID/modelID")
   "targetModels": [
     "glm-4.6",
@@ -128,11 +135,15 @@ export function getConfig(ctx?: PluginInput): UltrathinkConfig {
   const prefix = typeof loaded.prefix === "string" ? loaded.prefix : defaultConfig.prefix
   const mode = loaded.mode === "lite" || loaded.mode === "tool" ? loaded.mode : defaultConfig.mode
   const debug = typeof loaded.debug === "boolean" ? loaded.debug : defaultConfig.debug
+  const interceptToolsInThinking =
+    typeof loaded.interceptToolsInThinking === "boolean"
+      ? loaded.interceptToolsInThinking
+      : defaultConfig.interceptToolsInThinking
 
   const targetModels =
     Array.isArray((loaded as any).targetModels) && (loaded as any).targetModels.every((m: any) => typeof m === "string")
       ? ((loaded as any).targetModels as string[])
       : defaultConfig.targetModels
 
-  return { enabled, prefix, mode, debug, targetModels }
+  return { enabled, prefix, mode, debug, interceptToolsInThinking, targetModels }
 }

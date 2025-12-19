@@ -23,16 +23,16 @@ export function buildThinkingPrompt(prefix: string, failed: boolean): string {
   const header = getUltrathinkPrefixText(prefix)
 
   const successVariants = [
-    "Continue.",
-    "Review the tool output carefully, then continue.",
-    "Consider the tool output; proceed deliberately.",
-    "Think through the implications, then continue.",
+    "Tool execution complete. If the result is satisfactory, proceed to the next step.",
+    "Action successful. If no further changes are needed for this specific task, move on.",
+    "Update applied. Verify it briefly; if good, proceed.",
+    "Output received. If this completes the immediate requirement, advance to the next objective.",
   ]
 
   const failureVariants = [
-    "The tool failed. Re-check inputs, then decide next step.",
-    "The output looks failed or incomplete. Diagnose and retry if needed.",
-    "Treat this as a failure case; verify assumptions and continue.",
+    "The tool failed. Analyze the error message and retry with a fix.",
+    "Action failed. Check the inputs and correct your approach.",
+    "Error detected. Diagnose the issue and attempt a valid alternative.",
   ]
 
   const body = failed ? pick(failureVariants) : pick(successVariants)
