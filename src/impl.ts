@@ -54,11 +54,19 @@ export const implementation: Plugin = async (ctx) => {
   setDebugMode(config.debug || false)
   logToFile(`Config: ${JSON.stringify(config)}`)
 
-  // Legacy "lite" mode uses fetch wrapper injection.
-  // "tool" mode relies on OpenCode hooks only.
-  if (config.enabled && config.mode === "lite") {
-    initializeFetchWrapper(config)
-    logToFile(`🌐 Fetch wrapper enabled (lite mode)`, "DEBUG")
+  // Fetch wrapper is the PRIMARY injection mechanism - always enabled for target models.
+  // Hooks provide backup/redundancy but fetch wrapper is most reliable.
+  if (config.enabled) {
+    initializeFetchWrapper(config, {
+      injectRequests: true, // ALWAYS inject - this is the bulletproof baseline
+      // This is the knob for repairing malformed tool calls/thinking blocks
+      // that come back from the model as plain text.
+      sanitizeResponses: config.interceptToolsInThinking === true,
+    })
+    logToFile(
+      `🌐 Fetch wrapper enabled (injectRequests=ALWAYS, sanitizeResponses=${config.interceptToolsInThinking === true})`,
+      "DEBUG",
+    )
   }
 
   const hooks: any = {}
@@ -100,8 +108,11 @@ export const implementation: Plugin = async (ctx) => {
   // Hook to inject thinking during session compaction
   hooks["experimental.session.compacting"] = createSessionCompactionHandler(config)
 
+  // REMOVED: System transform hook was polluting context for ALL models, not just target models.
+  // The hook input is empty {} so we cannot filter by model. Fetch wrapper handles injection instead.
+
   logToFile(`PLUGIN LOADED WITH HOOKS: ${Object.keys(hooks).join(", ")}`, "DEBUG")
-  logTargetModels()
+  logTargetModels(config.targetModels)
   logToFile(`🔄 Hybrid system initialized (fetch wrapper + hooks)`, "DEBUG")
   return hooks
 }

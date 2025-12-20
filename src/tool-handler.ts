@@ -26,7 +26,9 @@ export function createToolExecuteHook(config: any, hookState: any = {}) {
     }
 
     // Tool hooks don't include model info; gate using session state learned from message transforms.
+    // If session state is unknown, we fail closed here but the fetch wrapper provides backup injection.
     if (!shouldEnhanceSession(input.sessionID)) {
+      logToFile(`⏭️ Skipping tool output enhancement - session not in enhance cache: ${input.sessionID}`, "DEBUG")
       return output
     }
 

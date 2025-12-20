@@ -1,27 +1,31 @@
-# Ultrathink Plugin - Agent Guidelines
+# Agent Guidelines for Pickle Thinker
 
-## Build/Development Commands
-```bash
-# Install dependencies
-cd .opencode && npm install
+## Commands
+- **Build**: `npm run build` (cleans `dist/` and compiles via `tsc`)
+- **Type Check**: `npx tsc --noEmit`
+- **Test**: `src/test-tool-interceptor.ts` is a self-contained test suite. Run with `npx tsx src/test-tool-interceptor.ts`.
+- **Lint**: Adhere to `tsconfig.json` strict mode.
 
-# Type checking
-cd .opencode && npx tsc --noEmit
+## Core Architecture
+- **Hybrid System**:
+  1.  **Fetch Wrapper** (`src/fetch-wrapper.ts`): Patches `globalThis.fetch`. Primary mechanism.
+  2.  **OpenCode Hooks** (`src/impl.ts`): Secondary mechanism for tool outputs (`tool.execute.after`) and session events.
 
-# No test framework - manual testing by installing plugin in OpenCode
-```
+## Key Logic Components
+- **Request Injection** (`src/fetch-wrapper/request-injector.ts`):
+  - "Bulletproof" injection: ensures every user message starts with `Ultrathink`.
+  - Varies prompts based on tool success/failure (detects "error", "exception").
+- **Response Sanitization** (`src/fetch-wrapper/openai-responses-sse.ts`):
+  - Intercepts SSE streams (`text/event-stream`).
+  - Buffers and rewrites text-based `<tool_call>` blocks into proper OpenAI `function_call` events.
+  - **Tool Inference** (`src/fetch-wrapper/tool-call-block.ts`): Infers tool names from arguments if missing (e.g., `filePath` + `content` -> `write`).
+- **Session Compaction** (`src/session-compaction.ts`):
+  - Re-injects "Ultrathink" prefix when context is summarized/pruned to maintain state.
+- **Tool Repair** (`src/tool-interceptor.ts`):
+  - Fixes unclosed/unopened `[think]` blocks.
+  - Rescues tool calls hallucinated inside thinking blocks.
 
-## Code Style Guidelines
-- **Language**: TypeScript with strict type checking
-- **Imports**: Use `import type` for type-only imports (see line 5)
-- **Interfaces**: Define config interfaces with clear property types
-- **Naming**: PascalCase for plugins/exported functions, camelCase for variables
-- **Error Handling**: Use try-catch blocks with graceful fallbacks (line 65-67)
-- **Functions**: Keep functions focused and single-purpose
-- **Comments**: JSDoc style for main plugin description
-- **Formatting**: Standard TypeScript formatting with 2-space indentation
-
-## Project Structure
-- Main plugin: `.opencode/plugin/ultrathink-plugin/index.ts`
-- Package config: `.opencode/package.json`
-- Plugin follows OpenCode plugin architecture with fetch wrapper pattern
+## Code Style
+- **Stack**: TypeScript (ESNext), Node.js.
+- **Imports**: `import type` for types. `node:` prefix for built-ins.
+- **Error Handling**: Typed errors; do not swallow failures.

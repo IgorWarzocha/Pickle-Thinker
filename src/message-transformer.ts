@@ -15,6 +15,7 @@ import { logToFile } from "./logger.js"
 import { shouldEnhanceModel } from "./model-filter.js"
 import { isToolOutputFailed } from "./utils.js"
 import { setSessionEnhanceState } from "./session-state.js"
+import { fixAllMessageIssues } from "./tool-interceptor.js"
 
 type AnyMessage = MessageWithParts & {
   info: any
@@ -23,6 +24,11 @@ type AnyMessage = MessageWithParts & {
 
 const USER_AFTER_TOOL_MARKER = "[opencode-ultrathink:user-after-tool]"
 const TOOL_PART_MARKER = "[opencode-ultrathink:tool-part]"
+
+// Simple ID generator for injected messages
+function generateId(prefix: string): string {
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`
+}
 
 function getModelKeyFromMessages(messages: AnyMessage[]): string {
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -112,19 +118,32 @@ function assistantHasToolParts(message: AnyMessage): { hasTool: boolean; failed:
   if (message.info?.role !== "assistant") return { hasTool: false, failed: false }
   if (!Array.isArray(message.parts)) return { hasTool: false, failed: false }
 
-  let hasTool = false
+  let hasToolFallback = false
   let failed = false
+  let stepFinishReason: string | undefined
 
   for (const part of message.parts) {
-    if (part?.type !== "tool") continue
-    const status = part?.state?.status
-    if (status === "completed") {
-      hasTool = true
+    if (part?.type === "step-finish") {
+      stepFinishReason = part.reason
     }
-    if (status === "error") {
-      hasTool = true
-      failed = true
+
+    if (part?.type === "tool") {
+      const status = part?.state?.status
+      if (status === "completed") {
+        hasToolFallback = true
+      }
+      if (status === "error") {
+        hasToolFallback = true
+        failed = true
+      }
     }
+  }
+
+  let hasTool = false
+  if (stepFinishReason) {
+    hasTool = stepFinishReason === "tool-calls"
+  } else {
+    hasTool = hasToolFallback
   }
 
   return { hasTool, failed }
@@ -171,31 +190,49 @@ function appendUltrathinkToToolParts(messages: AnyMessage[], prefix: string): nu
 function injectAfterToolMessages(messages: AnyMessage[], prefix: string): number {
   let injections = 0
 
+  // Extract context from the first message for proper structure
+  const sessionID = getSessionIDFromMessages(messages)
+  const modelKey = getModelKeyFromMessages(messages)
+  const [providerID, modelID] = modelKey.includes("/") ? modelKey.split("/") : ["unknown", modelKey]
+
+  // Find the last user message to get agent info
+  const lastUserMsg = messages.findLast((m) => m?.info?.role === "user")
+  const agent = lastUserMsg?.info?.agent ?? "user"
+
   for (let i = 0; i < messages.length; i++) {
     const message = messages[i]
     const { hasTool, failed } = assistantHasToolParts(message)
     if (!hasTool) continue
 
     const assistantID = typeof message.info?.id === "string" ? message.info.id : `assistant-${i}`
-    const injectedID = `ultrathink-after-${assistantID}`
+    const injectedMsgID = `ultrathink-after-${assistantID}`
 
     // Deduplicate: if the exact injected message already exists anywhere, skip.
-    if (messages.some((m) => m?.info?.id === injectedID)) {
+    if (messages.some((m) => m?.info?.id === injectedMsgID)) {
       continue
     }
 
     const ultrathink = buildThinkingPrompt(prefix, failed)
+    const partID = generateId("part")
 
+    // Create properly structured message matching OpenCode's MessageV2 schema
     messages.splice(i + 1, 0, {
       info: {
+        id: injectedMsgID,
+        sessionID: sessionID,
         role: "user",
-        id: injectedID,
-        created: Date.now(),
+        time: { created: Date.now() },
+        agent: agent,
+        model: { providerID, modelID },
       },
       parts: [
         {
+          id: partID,
+          sessionID: sessionID,
+          messageID: injectedMsgID,
           type: "text",
           text: `${USER_AFTER_TOOL_MARKER}\n${ultrathink}`,
+          synthetic: true, // Mark as system-generated
         },
       ],
     })
@@ -219,7 +256,7 @@ export function createTransformHandler(config: any, hookState: any = {}) {
 
     const sessionID = getSessionIDFromMessages(output.messages)
     const modelKey = getModelKeyFromMessages(output.messages)
-    const enhance = shouldEnhanceModel(modelKey)
+    const enhance = shouldEnhanceModel(modelKey, (config as any).targetModels)
 
     if (sessionID) {
       setSessionEnhanceState(sessionID, enhance, modelKey)
@@ -234,11 +271,19 @@ export function createTransformHandler(config: any, hookState: any = {}) {
     const prefixText = getUltrathinkPrefixText(prefix) + "\n\n"
 
     const toolMode = config.mode === "tool"
+    const interceptTools = config.interceptToolsInThinking === true
     const initialMessageCount = output.messages.length
 
     let userPrefixCount = 0
     let toolPartAppends = 0
     let toolTurnInjections = 0
+    let thinkingFixes = 0
+
+    // Fix tools mistakenly placed in thinking blocks first
+    if (interceptTools) {
+      const fixResult = fixAllMessageIssues(output.messages)
+      thinkingFixes = fixResult.thinkingFixes + fixResult.toolFixes
+    }
 
     if (toolMode) {
       userPrefixCount = ensureUltrathinkOnAllUserMessages(output.messages, prefixText)
@@ -250,10 +295,10 @@ export function createTransformHandler(config: any, hookState: any = {}) {
 
     const duration = Date.now() - startTime
 
-    if (userPrefixCount > 0 || toolPartAppends > 0 || toolTurnInjections > 0) {
+    if (userPrefixCount > 0 || toolPartAppends > 0 || toolTurnInjections > 0 || thinkingFixes > 0) {
       hookState.messageTransform.lastSuccess = Date.now()
       logToFile(
-        `✅ Ultrathink injected (mode=${toolMode ? "tool" : "lite"}, model=${modelKey}, prefixed=${userPrefixCount}, toolPartAppends=${toolPartAppends}, toolTurns=${toolTurnInjections}, ${duration}ms, ${initialMessageCount}→${output.messages.length} messages)`,
+        `✅ Ultrathink injected (mode=${toolMode ? "tool" : "lite"}, model=${modelKey}, prefixed=${userPrefixCount}, toolPartAppends=${toolPartAppends}, toolTurns=${toolTurnInjections}, thinkingFixes=${thinkingFixes}, ${duration}ms, ${initialMessageCount}→${output.messages.length} messages)`,
       )
     } else {
       logToFile(`⚠️ No changes (mode=${toolMode ? "tool" : "lite"}, model=${modelKey}, ${duration}ms)`, "DEBUG")
