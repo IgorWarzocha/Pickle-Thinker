@@ -8,7 +8,6 @@ import { getConfig } from "./config.js"
 import { createTransformHandler } from "./message-transformer.js"
 import { createToolExecuteHook } from "./tool-handler.js"
 import { createSessionCompactionHandler } from "./session-compaction.js"
-import { createSystemTransformHandler } from "./system-transformer.js"
 import { clearLogFile, logToFile, setDebugMode } from "./logger.js"
 import { initializeFetchWrapper } from "./fetch-wrapper.js"
 import { logTargetModels } from "./model-filter.js"
@@ -55,17 +54,17 @@ export const implementation: Plugin = async (ctx) => {
   setDebugMode(config.debug || false)
   logToFile(`Config: ${JSON.stringify(config)}`)
 
-  // Fetch wrapper is used for request injection in "lite" mode,
-  // and for response sanitization in all modes.
+  // Fetch wrapper is the PRIMARY injection mechanism - always enabled for target models.
+  // Hooks provide backup/redundancy but fetch wrapper is most reliable.
   if (config.enabled) {
     initializeFetchWrapper(config, {
-      injectRequests: config.mode === "lite",
+      injectRequests: true, // ALWAYS inject - this is the bulletproof baseline
       // This is the knob for repairing malformed tool calls/thinking blocks
       // that come back from the model as plain text.
       sanitizeResponses: config.interceptToolsInThinking === true,
     })
     logToFile(
-      `🌐 Fetch wrapper enabled (injectRequests=${config.mode === "lite"}, sanitizeResponses=${config.interceptToolsInThinking === true})`,
+      `🌐 Fetch wrapper enabled (injectRequests=ALWAYS, sanitizeResponses=${config.interceptToolsInThinking === true})`,
       "DEBUG",
     )
   }
@@ -109,8 +108,8 @@ export const implementation: Plugin = async (ctx) => {
   // Hook to inject thinking during session compaction
   hooks["experimental.session.compacting"] = createSessionCompactionHandler(config)
 
-  // Hook to inject thinking into the system prompt
-  hooks["experimental.chat.system.transform"] = createSystemTransformHandler(config)
+  // REMOVED: System transform hook was polluting context for ALL models, not just target models.
+  // The hook input is empty {} so we cannot filter by model. Fetch wrapper handles injection instead.
 
   logToFile(`PLUGIN LOADED WITH HOOKS: ${Object.keys(hooks).join(", ")}`, "DEBUG")
   logTargetModels(config.targetModels)

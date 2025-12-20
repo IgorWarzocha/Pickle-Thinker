@@ -1,15 +1,12 @@
 /**
  * Fetch wrapper for Ultrathink.
- * Mutates outbound requests in lite mode and sanitizes inbound streaming responses to recover malformed tool calls.
+ * PRIMARY injection mechanism - intercepts all outbound requests to target models.
+ * Also sanitizes inbound streaming responses to recover malformed tool calls.
  */
 
 import { logToFile } from "./logger.js"
 import { shouldEnhanceModel, logTargetModels } from "./model-filter.js"
-import {
-  injectIntoAnthropicMessages,
-  injectIntoOpenAIMessages,
-  injectLitePrefix,
-} from "./fetch-wrapper/request-injector.js"
+import { injectIntoOpenAIMessages, injectIntoAnthropicMessages } from "./fetch-wrapper/request-injector.js"
 import { sanitizeModelResponse } from "./fetch-wrapper/response-sanitizer.js"
 import type { FetchWrapperConfig, FetchWrapperOptions } from "./fetch-wrapper/types.js"
 
@@ -33,25 +30,21 @@ export function initializeFetchWrapper(config: FetchWrapperConfig, options: Fetc
     const injectRequests = options.injectRequests === true
     const sanitizeResponses = options.sanitizeResponses === true
 
-    if (injectRequests && parsedBody) {
+    if (injectRequests && parsedBody && Array.isArray(parsedBody.messages)) {
       try {
         const toolMode = config.mode === "tool"
+        let modified = false
 
-        if (Array.isArray(parsedBody.messages)) {
-          const modified = toolMode
-            ? injectIntoOpenAIMessages(parsedBody.messages, config.prefix, toolMode)
-            : injectLitePrefix(parsedBody.messages, config.prefix)
+        // Try OpenAI-style injection (handles both string and array content)
+        modified = injectIntoOpenAIMessages(parsedBody.messages, config.prefix, toolMode) || modified
 
-          if (modified) {
-            init.body = JSON.stringify(parsedBody)
-          }
-        }
+        // Also try Anthropic-style injection (handles tool_result parts)
+        // Both can run - they handle different message formats
+        modified = injectIntoAnthropicMessages(parsedBody.messages, config.prefix, toolMode) || modified
 
-        if (toolMode && Array.isArray(parsedBody.messages)) {
-          const modified = injectIntoAnthropicMessages(parsedBody.messages, config.prefix, toolMode)
-          if (modified) {
-            init.body = JSON.stringify(parsedBody)
-          }
+        if (modified) {
+          init.body = JSON.stringify(parsedBody)
+          logToFile(`💉 Fetch wrapper injected Ultrathink into request for model: ${modelId}`, "DEBUG")
         }
       } catch (error) {
         logToFile(`🌐 Fetch wrapper request injection error: ${error}`, "DEBUG")

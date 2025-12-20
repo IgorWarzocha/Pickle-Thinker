@@ -111,48 +111,11 @@ export function sanitizeOpenAISseEventStream(response: Response, options: Rewrit
     return "unknown"
   }
 
-  // Streaming-friendly thinking wrapper stripping.
-  // Models sometimes split tags across deltas, e.g. "</th" + "ink>".
-  // Avoid TDZ issues by using `var` and lazy prefix checks.
-  var danglingThinkPrefix: string | undefined
-
-  function stripThinkingWrappers(text: string): string {
-    const combined = (danglingThinkPrefix ?? "") + text
-    danglingThinkPrefix = ""
-
-    // Remove any complete markers (case-insensitive).
-    let cleaned = combined.replace(/<\/?think>\s*/gi, "").replace(/\[\/?think\]\s*/gi, "")
-
-    const split = splitDanglingThinkingPrefix(cleaned)
-    danglingThinkPrefix = split.dangling
-    cleaned = split.visible
-
-    return cleaned
-  }
-
-  function splitDanglingThinkingPrefix(text: string): { visible: string; dangling: string } {
-    const markers = ["<think>", "</think>", "[think]", "[/think]"]
-
-    // Avoid buffering overly-generic fragments.
-    const max = Math.min(text.length, 8)
-    for (let len = max; len >= 3; len--) {
-      const suffix = text.slice(-len)
-      const lowered = suffix.toLowerCase()
-
-      if (!lowered.includes("th")) continue
-      if (!markers.some((m) => m.startsWith(lowered))) continue
-
-      return { visible: text.slice(0, -len), dangling: suffix }
-    }
-
-    return { visible: text, dangling: "" }
-  }
-
   function extractToolCallsFromText(text: string): {
     visibleText: string
     toolCalls: Array<{ toolName: string; arguments: string }>
   } {
-    let remaining = stripThinkingWrappers(text)
+    let remaining = text
 
     let visibleText = ""
     const toolCalls: Array<{ toolName: string; arguments: string }> = []

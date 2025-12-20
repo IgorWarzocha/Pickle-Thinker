@@ -25,6 +25,11 @@ type AnyMessage = MessageWithParts & {
 const USER_AFTER_TOOL_MARKER = "[opencode-ultrathink:user-after-tool]"
 const TOOL_PART_MARKER = "[opencode-ultrathink:tool-part]"
 
+// Simple ID generator for injected messages
+function generateId(prefix: string): string {
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`
+}
+
 function getModelKeyFromMessages(messages: AnyMessage[]): string {
   for (let i = messages.length - 1; i >= 0; i--) {
     const info: any = messages[i]?.info
@@ -185,31 +190,49 @@ function appendUltrathinkToToolParts(messages: AnyMessage[], prefix: string): nu
 function injectAfterToolMessages(messages: AnyMessage[], prefix: string): number {
   let injections = 0
 
+  // Extract context from the first message for proper structure
+  const sessionID = getSessionIDFromMessages(messages)
+  const modelKey = getModelKeyFromMessages(messages)
+  const [providerID, modelID] = modelKey.includes("/") ? modelKey.split("/") : ["unknown", modelKey]
+
+  // Find the last user message to get agent info
+  const lastUserMsg = messages.findLast((m) => m?.info?.role === "user")
+  const agent = lastUserMsg?.info?.agent ?? "user"
+
   for (let i = 0; i < messages.length; i++) {
     const message = messages[i]
     const { hasTool, failed } = assistantHasToolParts(message)
     if (!hasTool) continue
 
     const assistantID = typeof message.info?.id === "string" ? message.info.id : `assistant-${i}`
-    const injectedID = `ultrathink-after-${assistantID}`
+    const injectedMsgID = `ultrathink-after-${assistantID}`
 
     // Deduplicate: if the exact injected message already exists anywhere, skip.
-    if (messages.some((m) => m?.info?.id === injectedID)) {
+    if (messages.some((m) => m?.info?.id === injectedMsgID)) {
       continue
     }
 
     const ultrathink = buildThinkingPrompt(prefix, failed)
+    const partID = generateId("part")
 
+    // Create properly structured message matching OpenCode's MessageV2 schema
     messages.splice(i + 1, 0, {
       info: {
+        id: injectedMsgID,
+        sessionID: sessionID,
         role: "user",
-        id: injectedID,
-        created: Date.now(),
+        time: { created: Date.now() },
+        agent: agent,
+        model: { providerID, modelID },
       },
       parts: [
         {
+          id: partID,
+          sessionID: sessionID,
+          messageID: injectedMsgID,
           type: "text",
           text: `${USER_AFTER_TOOL_MARKER}\n${ultrathink}`,
+          synthetic: true, // Mark as system-generated
         },
       ],
     })
