@@ -3,12 +3,28 @@
  * PRIMARY injection mechanism for forcing Ultrathink prompts into outbound API requests.
  *
  * Strategy:
- * 1. ALWAYS ensure the last user message starts with "Ultrathink" (bulletproof baseline)
+ * 1. ALWAYS ensure the last user message starts with "Ultrathink" instruction
  * 2. In tool mode, also inject thinking prompts after tool outputs
  * 3. Use consistent deduplication to avoid double-injection
  */
 
 const ULTRATHINK_KEYWORD = "ultrathink"
+
+/**
+ * The instruction injected before user messages.
+ * This is an explicit command, not just a keyword trigger.
+ */
+const ULTRATHINK_INSTRUCTION = `Ultrathink before responding. You MUST begin your response with deep thinking about the task.`
+
+/**
+ * The instruction injected after tool outputs.
+ */
+function getAfterToolInstruction(failed: boolean): string {
+  if (failed) {
+    return `Ultrathink about this error. Analyze what went wrong and how to fix it before taking any action.`
+  }
+  return `Ultrathink about these results. Analyze the output and plan your next steps before taking any action.`
+}
 
 function isString(x: unknown): x is string {
   return typeof x === "string"
@@ -27,17 +43,17 @@ function hasUltrathinkPrefix(text: string): boolean {
 }
 
 /**
- * Inject prefix into a string content, with deduplication.
+ * Inject instruction into a string content, with deduplication.
  */
-function injectPrefixIntoString(content: string, prefix: string): string | null {
+function injectInstructionIntoString(content: string): string | null {
   if (hasUltrathinkPrefix(content)) return null
-  return prefix + "\n\n" + content
+  return ULTRATHINK_INSTRUCTION + "\n\n" + content
 }
 
 /**
- * Inject prefix into the first text part of an array content, with deduplication.
+ * Inject instruction into the first text part of an array content, with deduplication.
  */
-function injectPrefixIntoArrayContent(content: unknown[], prefix: string): boolean {
+function injectInstructionIntoArrayContent(content: unknown[]): boolean {
   for (const part of content) {
     if (!isRecord(part) || part.type !== "text") continue
     const text = (part as any).text
@@ -45,17 +61,17 @@ function injectPrefixIntoArrayContent(content: unknown[], prefix: string): boole
 
     if (hasUltrathinkPrefix(text))
       return false // Already has prefix
-    ;(part as any).text = prefix + "\n\n" + text
+    ;(part as any).text = ULTRATHINK_INSTRUCTION + "\n\n" + text
     return true
   }
   return false
 }
 
 /**
- * BULLETPROOF: Always ensure the last user message starts with Ultrathink.
+ * BULLETPROOF: Always ensure the last user message starts with Ultrathink instruction.
  * This is the baseline guarantee - even if all other injections fail, this will work.
  */
-function ensureLastUserMessageHasPrefix(messages: unknown[], prefix: string): boolean {
+function ensureLastUserMessageHasInstruction(messages: unknown[]): boolean {
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i]
     if (!isRecord(msg) || msg.role !== "user") continue
@@ -64,7 +80,7 @@ function ensureLastUserMessageHasPrefix(messages: unknown[], prefix: string): bo
 
     // Handle string content
     if (isString(content)) {
-      const injected = injectPrefixIntoString(content, prefix)
+      const injected = injectInstructionIntoString(content)
       if (injected !== null) {
         msg.content = injected
         return true
@@ -74,7 +90,7 @@ function ensureLastUserMessageHasPrefix(messages: unknown[], prefix: string): bo
 
     // Handle array content (OpenAI multi-part format)
     if (Array.isArray(content)) {
-      return injectPrefixIntoArrayContent(content, prefix)
+      return injectInstructionIntoArrayContent(content)
     }
   }
   return false
@@ -83,7 +99,7 @@ function ensureLastUserMessageHasPrefix(messages: unknown[], prefix: string): bo
 /**
  * Inject thinking prompts after tool/function role messages (OpenAI format).
  */
-function injectAfterToolRoleMessages(messages: unknown[], prefix: string): boolean {
+function injectAfterToolRoleMessages(messages: unknown[]): boolean {
   let modified = false
 
   for (let i = 0; i < messages.length; i++) {
@@ -105,7 +121,7 @@ function injectAfterToolRoleMessages(messages: unknown[], prefix: string): boole
     const failed = isToolOutputFailed(msg.content)
     messages.splice(i + 1, 0, {
       role: "user",
-      content: buildThinkingPrompt(prefix, failed),
+      content: getAfterToolInstruction(failed),
     })
     modified = true
     i++ // Skip the injected message
@@ -117,7 +133,7 @@ function injectAfterToolRoleMessages(messages: unknown[], prefix: string): boole
 /**
  * Inject thinking prompts after tool_result parts in user messages (Anthropic format).
  */
-function injectAfterToolResultParts(messages: unknown[], prefix: string): boolean {
+function injectAfterToolResultParts(messages: unknown[]): boolean {
   let modified = false
 
   for (let i = 0; i < messages.length; i++) {
@@ -142,7 +158,7 @@ function injectAfterToolResultParts(messages: unknown[], prefix: string): boolea
     const failed = toolResultParts.some((part) => isToolOutputFailed((part as any).content))
     messages.splice(i + 1, 0, {
       role: "user",
-      content: buildThinkingPrompt(prefix, failed),
+      content: getAfterToolInstruction(failed),
     })
     modified = true
     i++ // Skip the injected message
@@ -155,17 +171,17 @@ function injectAfterToolResultParts(messages: unknown[], prefix: string): boolea
  * Main OpenAI-style injection.
  * Handles both string and array content formats.
  */
-export function injectIntoOpenAIMessages(messages: unknown[], prefix: string, toolMode: boolean): boolean {
+export function injectIntoOpenAIMessages(messages: unknown[], _prefix: string, toolMode: boolean): boolean {
   if (messages.length === 0) return false
 
   let modified = false
 
-  // STEP 1: ALWAYS ensure last user message has prefix (bulletproof baseline)
-  modified = ensureLastUserMessageHasPrefix(messages, prefix) || modified
+  // STEP 1: ALWAYS ensure last user message has instruction (bulletproof baseline)
+  modified = ensureLastUserMessageHasInstruction(messages) || modified
 
   // STEP 2: In tool mode, inject after tool outputs for deeper analysis
   if (toolMode) {
-    modified = injectAfterToolRoleMessages(messages, prefix) || modified
+    modified = injectAfterToolRoleMessages(messages) || modified
   }
 
   return modified
@@ -175,24 +191,24 @@ export function injectIntoOpenAIMessages(messages: unknown[], prefix: string, to
  * Anthropic-style injection.
  * Handles tool_result parts within user messages.
  */
-export function injectIntoAnthropicMessages(messages: unknown[], prefix: string, toolMode: boolean): boolean {
+export function injectIntoAnthropicMessages(messages: unknown[], _prefix: string, toolMode: boolean): boolean {
   if (messages.length === 0) return false
 
   let modified = false
 
   // STEP 1: Inject after tool_result parts
   if (toolMode) {
-    modified = injectAfterToolResultParts(messages, prefix) || modified
+    modified = injectAfterToolResultParts(messages) || modified
   }
 
-  // STEP 2: Ensure last user message has prefix (backup for Anthropic format)
+  // STEP 2: Ensure last user message has instruction (backup for Anthropic format)
   // Only if the last user message has array content (Anthropic-style)
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i]
     if (!isRecord(msg) || msg.role !== "user") continue
 
     if (Array.isArray(msg.content)) {
-      modified = injectPrefixIntoArrayContent(msg.content, prefix) || modified
+      modified = injectInstructionIntoArrayContent(msg.content) || modified
     }
     break
   }
@@ -235,14 +251,4 @@ export function isToolOutputFailed(content: unknown): boolean {
   }
 
   return false
-}
-
-/**
- * Build the thinking prompt to inject.
- */
-export function buildThinkingPrompt(prefix: string, failed: boolean): string {
-  if (failed) {
-    return `${prefix}\n\nTool output indicates failure. Analyze the error and determine next steps.`
-  }
-  return `${prefix}\n\nAnalyze the tool output and continue with the task.`
 }
