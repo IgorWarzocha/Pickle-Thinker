@@ -22,6 +22,16 @@ Config lives in `~/.config/opencode/pickle-thinker.jsonc` (auto-created) or `.op
   // If you set `prefix` to something else, the plugin still forces `Ultrathink`.
   "prefix": "Ultrathink: ",
   "debug": false,
+  // Detect and fix tools that are mistakenly placed within thinking blocks
+  "interceptToolsInThinking": true,
+  // Target models (substring match)
+  "targetModels": [
+    "glm-4.6",
+    "zai/glm-4.6",
+    "zai-coding-plan/glm-4.6",
+    "big-pickle",
+    "opencode/big-pickle"
+  ]
 }
 ```
 
@@ -34,6 +44,7 @@ This plugin only activates for the target models (GLM-4.6 + Big Pickle). For tho
 - **Every user message is forced to start with `Ultrathink`** (as a dedicated leading text part).
 - **After tool results**, the plugin injects a synthetic user “continue + ultrathink” message so the model can think _between_ tool calls.
 - **Tool outputs and tool errors are also appended with an `Ultrathink` block** as an extra safety net.
+- **Session Compaction**: When conversations get too long and are summarized, the plugin re-injects instructions to ensure the model stays in thinking mode.
 
 Duplication is intentional; missing `Ultrathink` is the bug.
 
@@ -48,7 +59,7 @@ Add to your repository `opencode.json` or user-level `~/.config/opencode/opencod
 
 ```json
 {
-  "plugin": ["@howaboua/pickle-thinker@0.3.0"]
+  "plugin": ["@howaboua/pickle-thinker@0.4.0"]
 }
 ```
 
@@ -60,8 +71,8 @@ Other installation methods (manual folder installs, submodules) are intentionall
   - First thing the model sees in each user message: `Ultrathink`
 
 - After any tool result (synthetic interleave turn):
-  - `Ultrathink\n\nContinue.`
-  - `Ultrathink\n\nReview the tool output carefully, then continue.`
+  - `Ultrathink about these results. Analyze the output carefully...`
+  - `Ultrathink about these results. Review what was returned...`
 
 - Tool output appended (extra safety net):
   - Tool output will also contain an `Ultrathink` block (with a small marker tag) so even “weird” tool flows still surface the keyword.
